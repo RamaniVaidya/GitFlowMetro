@@ -15,7 +15,7 @@ def build_commit_lookup(repository: Repository):
     return lookup
 
 
-
+'''
 def assign_branch_levels(repository):
     """
     Assigns simple visual branch lanes.
@@ -65,7 +65,7 @@ def assign_branch_levels(repository):
 
         if commit.is_merge:
             commit.branch_level = 0
-
+'''
 
 
 def build_graph(repository):
@@ -113,7 +113,16 @@ def build_graph(repository):
 
     # Calculate branch positions
 
-    assign_branch_levels(repository)
+    #assign_branch_levels(repository)
 
+    for commit in repository.commits:
+        print(
+            commit.hash[:7],
+            "children:",
+            [
+                c[:7]
+                for c in commit.children
+            ]
+        )
 
     return repository
