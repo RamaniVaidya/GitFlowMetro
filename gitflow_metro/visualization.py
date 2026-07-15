@@ -1,1955 +1,1850 @@
+from __future__ import annotations
+
 import bpy
 
 from mathutils import Vector
 
 
 # ============================================================
-# SETTINGS
+# CONFIGURATION
 # ============================================================
 
-SPHERE_RADIUS = 0.3
+GITFLOW_OBJECT_TAG = "gitflow_metro_object"
 
-MERGE_SCALE = 1.55
+INFORMATION_OBJECT_TAG = "gitflow_information_object"
+INFORMATION_TYPE_TAG = "gitflow_information_type"
+INFORMATION_PREFIX_TAG = "gitflow_information_prefix"
+INFORMATION_ROOT_TAG = "gitflow_information_root"
 
-CONNECTION_RADIUS = 0.05
-
-
-BANNER_WIDTH = 4.3
-
-NORMAL_BANNER_HEIGHT = 2.05
-
-SPECIAL_BANNER_HEIGHT = 2.75
-
-BANNER_X_OFFSET = 0.45
-
-BANNER_Z_OFFSET = 1.8
+COMMIT_HASH_TAG = "gitflow_commit_hash"
 
 
-GITFLOW_OBJECT_TAG = "gitflow_metro_generated"
-
-GITFLOW_BANNER_TAG = "gitflow_commit_banner"
-
-
-GITFLOW_COLLECTION_NAME = "GitFlowMetro"
-
-GITFLOW_INFO_COLLECTION_NAME = "GitFlowMetro_Info"
+SPHERE_RADIUS = 0.34
+LINE_RADIUS = 0.095
 
 
-# ============================================================
-# COLLECTION HELPERS
-# ============================================================
+MAIN_COLOR = (
+    0.035,
+    0.28,
+    0.80,
+    1.0,
+)
 
-def get_or_create_collection(
-    collection_name,
-):
-    """
-    Create or reuse a collection linked directly
-    to the current scene.
-    """
+FEATURE_COLOR = (
+    0.02,
+    0.68,
+    0.25,
+    1.0,
+)
 
-    collection = bpy.data.collections.get(
-        collection_name
-    )
+MERGE_COLOR = (
+    1.0,
+    0.48,
+    0.03,
+    1.0,
+)
 
-
-    if collection is None:
-
-        collection = bpy.data.collections.new(
-            collection_name
-        )
-
-
-    scene_collection = (
-        bpy.context.scene.collection
-    )
-
-
-    already_linked = any(
-
-        child == collection
-
-        for child in scene_collection.children
-    )
-
-
-    if not already_linked:
-
-        scene_collection.children.link(
-            collection
-        )
-
-
-    return collection
-
-
-def link_object_to_collection(
-    obj,
-    collection_name,
-):
-    """
-    Move an object into a GitFlow Metro collection.
-
-    Objects are unlinked from previous collections so
-    they appear only once in the Outliner.
-    """
-
-    target_collection = (
-        get_or_create_collection(
-            collection_name
-        )
-    )
-
-
-    for current_collection in list(
-        obj.users_collection
-    ):
-
-        current_collection.objects.unlink(
-            obj
-        )
-
-
-    target_collection.objects.link(
-        obj
-    )
+REBASE_COLOR = (
+    0.68,
+    0.18,
+    0.90,
+    1.0,
+)
 
 
 # ============================================================
-# MATERIALS
+# SELECTED COMMIT PANEL
+# ============================================================
+
+SELECTED_PANEL_WIDTH = 5.20
+SELECTED_PANEL_HEIGHT = 3.20
+SELECTED_PANEL_DEPTH = 0.10
+
+SELECTED_PANEL_COLOR = (
+    0.018,
+    0.028,
+    0.060,
+    1.0,
+)
+
+SELECTED_PANEL_BORDER_COLOR = (
+    0.05,
+    0.55,
+    1.0,
+    1.0,
+)
+
+SELECTED_TITLE_COLOR = (
+    0.15,
+    0.72,
+    1.0,
+    1.0,
+)
+
+SELECTED_LABEL_COLOR = (
+    0.30,
+    0.70,
+    1.0,
+    1.0,
+)
+
+SELECTED_TEXT_COLOR = (
+    0.95,
+    0.97,
+    1.0,
+    1.0,
+)
+
+
+# ============================================================
+# ALL COMMIT INFORMATION
+# ============================================================
+
+ALL_LABEL_WIDTH = 3.10
+ALL_LABEL_HEIGHT = 1.75
+ALL_LABEL_DEPTH = 0.08
+
+ALL_LABEL_COLOR = (
+    0.018,
+    0.028,
+    0.060,
+    1.0,
+)
+
+ALL_LABEL_BORDER_COLOR = (
+    0.05,
+    0.50,
+    0.95,
+    1.0,
+)
+
+ALL_LABEL_TITLE_COLOR = (
+    0.18,
+    0.70,
+    1.0,
+    1.0,
+)
+
+ALL_LABEL_TEXT_COLOR = (
+    0.94,
+    0.96,
+    1.0,
+    1.0,
+)
+
+LEADER_LINE_COLOR = (
+    0.08,
+    0.52,
+    0.92,
+    1.0,
+)
+
+
+# ============================================================
+# MATERIAL
 # ============================================================
 
 def create_material(
     name,
     color,
-    alpha=1.0,
+    *,
+    metallic=0.0,
+    roughness=0.45,
+    emission_strength=0.0,
 ):
-    """
-    Create or reuse a Blender material.
-    """
 
-    material = bpy.data.materials.get(
-        name
-    )
-
+    material = bpy.data.materials.get(name)
 
     if material is None:
+        material = bpy.data.materials.new(name=name)
 
-        material = bpy.data.materials.new(
-            name
-        )
-
-
+    material.diffuse_color = color
     material.use_nodes = True
 
-
-    bsdf = material.node_tree.nodes.get(
+    principled = material.node_tree.nodes.get(
         "Principled BSDF"
     )
 
+    if principled is not None:
 
-    if bsdf is not None:
+        if "Base Color" in principled.inputs:
+            principled.inputs[
+                "Base Color"
+            ].default_value = color
 
-        rgba = (
+        if "Metallic" in principled.inputs:
+            principled.inputs[
+                "Metallic"
+            ].default_value = metallic
 
-            color[0],
-
-            color[1],
-
-            color[2],
-
-            alpha,
-        )
-
-
-        bsdf.inputs[
-            "Base Color"
-        ].default_value = rgba
-
-
-        if "Alpha" in bsdf.inputs:
-
-            bsdf.inputs[
-                "Alpha"
-            ].default_value = alpha
-
-
-        if "Roughness" in bsdf.inputs:
-
-            bsdf.inputs[
+        if "Roughness" in principled.inputs:
+            principled.inputs[
                 "Roughness"
-            ].default_value = 0.65
+            ].default_value = roughness
 
+        if "Alpha" in principled.inputs:
+            principled.inputs[
+                "Alpha"
+            ].default_value = color[3]
 
-    material.diffuse_color = (
-
-        color[0],
-
-        color[1],
-
-        color[2],
-
-        alpha,
-    )
-
-
-    if alpha < 1.0:
-
-        if hasattr(
-            material,
-            "surface_render_method",
+        if (
+            emission_strength > 0.0
+            and "Emission Color" in principled.inputs
         ):
+            principled.inputs[
+                "Emission Color"
+            ].default_value = color
 
-            try:
-
-                material.surface_render_method = (
-                    "DITHERED"
-                )
-
-            except Exception:
-
-                pass
-
-
-        if hasattr(
-            material,
-            "blend_method",
+        if (
+            emission_strength > 0.0
+            and "Emission Strength" in principled.inputs
         ):
-
-            try:
-
-                material.blend_method = "BLEND"
-
-            except Exception:
-
-                pass
-
+            principled.inputs[
+                "Emission Strength"
+            ].default_value = emission_strength
 
     return material
 
 
 # ============================================================
-# OBJECT TAGGING
+# TAGGING
 # ============================================================
 
-def mark_as_gitflow_object(
-    obj,
-):
+def mark_as_gitflow_object(obj):
 
     obj[GITFLOW_OBJECT_TAG] = True
 
+    return obj
 
-def mark_as_banner_object(
+
+def mark_information_object(
     obj,
+    information_type,
+    object_prefix="",
+    *,
+    is_root=False,
 ):
 
-    obj[GITFLOW_BANNER_TAG] = True
+    obj[INFORMATION_OBJECT_TAG] = True
+    obj[INFORMATION_TYPE_TAG] = information_type
+    obj[INFORMATION_PREFIX_TAG] = object_prefix
+    obj[INFORMATION_ROOT_TAG] = bool(is_root)
+
+    return obj
 
 
 # ============================================================
-# COLLECTION CLEANUP
+# CLEAR
 # ============================================================
 
-def remove_empty_gitflow_collections():
-    """
-    Remove generated collections after their objects
-    have been deleted.
-    """
-
-    for collection_name in (
-
-        GITFLOW_INFO_COLLECTION_NAME,
-
-        GITFLOW_COLLECTION_NAME,
-    ):
-
-        collection = bpy.data.collections.get(
-            collection_name
-        )
-
-
-        if collection is None:
-
-            continue
-
-
-        if (
-
-            len(collection.objects) == 0
-
-            and len(collection.children) == 0
-        ):
-
-            bpy.data.collections.remove(
-                collection
-            )
-
-
-# ============================================================
-# INFORMATION BOARD CLEANUP
-# ============================================================
-
-def hide_commit_information():
-    """
-    Remove only the currently displayed commit
-    information board.
-    """
+def clear_gitflow_scene():
 
     objects_to_remove = [
-
         obj
-
-        for obj in list(
-            bpy.data.objects
-        )
-
+        for obj in bpy.data.objects
         if obj.get(
-            GITFLOW_BANNER_TAG,
+            GITFLOW_OBJECT_TAG,
             False,
         )
     ]
 
-
     for obj in objects_to_remove:
 
         bpy.data.objects.remove(
-
             obj,
-
             do_unlink=True,
         )
-
-
-    remove_empty_gitflow_collections()
-
-
-# ============================================================
-# COMPLETE VISUALIZATION CLEANUP
-# ============================================================
-
-def clear_gitflow_scene():
-    """
-    Remove repository visualization and temporary
-    information-board objects.
-
-    Camera and lights are intentionally preserved.
-    """
-
-    objects_to_remove = [
-
-        obj
-
-        for obj in list(
-            bpy.data.objects
-        )
-
-        if (
-
-            obj.get(
-                GITFLOW_OBJECT_TAG,
-                False,
-            )
-
-            or obj.get(
-                GITFLOW_BANNER_TAG,
-                False,
-            )
-
-            or obj.name.startswith(
-                "Commit_"
-            )
-
-            or obj.name.startswith(
-                "Connection_"
-            )
-
-            or obj.name.startswith(
-                "CommitInfo_"
-            )
-        )
-    ]
-
-
-    removed_count = len(
-        objects_to_remove
-    )
-
-
-    for obj in objects_to_remove:
-
-        bpy.data.objects.remove(
-
-            obj,
-
-            do_unlink=True,
-        )
-
-
-    remove_empty_gitflow_collections()
-
 
     print(
-
         "Cleared",
-
-        removed_count,
-
+        len(objects_to_remove),
         "GitFlow Metro objects",
     )
 
 
+def clear_visualization():
+
+    clear_gitflow_scene()
+
+    try:
+        from .environment import clear_environment
+        clear_environment()
+
+    except ImportError:
+        pass
+
+
 # ============================================================
-# COMMIT HELPERS
+# REPOSITORY HELPERS
 # ============================================================
 
-def get_commit_radius(
-    commit,
-):
+def get_repository_commits(repository):
 
-    if commit.is_merge:
+    commits = getattr(
+        repository,
+        "commits",
+        [],
+    )
 
-        return (
-            SPHERE_RADIUS
-            * MERGE_SCALE
+    if isinstance(commits, dict):
+        return list(commits.values())
+
+    return list(commits)
+
+
+def get_commit_hash(commit):
+
+    value = getattr(
+        commit,
+        "hash",
+        None,
+    )
+
+    if value is None:
+
+        value = getattr(
+            commit,
+            "commit_hash",
+            "",
         )
 
+    return str(value)
 
-    return SPHERE_RADIUS
+
+def get_commit_message(commit):
+
+    value = getattr(
+        commit,
+        "message",
+        "",
+    )
+
+    if not value:
+        return "(No message)"
+
+    return str(value)
 
 
-def get_surface_point(
-    center,
-    direction,
-    radius,
+def get_commit_author(commit):
+
+    value = getattr(
+        commit,
+        "author",
+        "",
+    )
+
+    if not value:
+        return "Unknown"
+
+    return str(value)
+
+
+def get_commit_date(commit):
+
+    value = getattr(
+        commit,
+        "date",
+        "",
+    )
+
+    if not value:
+        return "Unknown"
+
+    return str(value)
+
+
+def get_commit_parents(commit):
+
+    parents = getattr(
+        commit,
+        "parents",
+        [],
+    )
+
+    if parents is None:
+        return []
+
+    return list(parents)
+
+
+def get_commit_lane(commit):
+
+    return int(
+        getattr(
+            commit,
+            "branch_level",
+            0,
+        )
+    )
+
+
+def get_commit_simulation_type(commit):
+
+    simulation_type = getattr(
+        commit,
+        "simulation_type",
+        "",
+    )
+
+    if simulation_type:
+        return str(simulation_type).upper()
+
+    if len(get_commit_parents(commit)) > 1:
+        return "MERGE"
+
+    return "NORMAL"
+
+
+def get_original_commit_hash(commit):
+
+    value = getattr(
+        commit,
+        "original_hash",
+        "",
+    )
+
+    if not value:
+        return ""
+
+    return str(value)
+
+
+def find_commit(
+    repository,
+    commit_hash,
 ):
 
-    center = Vector(
-        center
-    )
+    target = str(commit_hash)
+
+    for commit in get_repository_commits(repository):
+
+        current_hash = get_commit_hash(commit)
+
+        if (
+            current_hash == target
+            or current_hash.startswith(target)
+            or target.startswith(current_hash)
+        ):
+            return commit
+
+    return None
 
 
-    direction = Vector(
-        direction
-    )
+# ============================================================
+# TEXT HELPERS
+# ============================================================
 
+def shorten_text(
+    value,
+    maximum_length,
+):
 
-    if direction.length < 0.000001:
+    value = str(value)
 
-        return center
-
-
-    direction.normalize()
-
+    if len(value) <= maximum_length:
+        return value
 
     return (
+        value[:maximum_length - 3]
+        + "..."
+    )
 
-        center
 
-        + direction * radius
+def clean_date(value):
+
+    value = str(value)
+
+    if "T" in value:
+        value = value.replace("T", " ")
+
+    return shorten_text(
+        value,
+        19,
     )
 
 
 # ============================================================
-# LANE MATERIALS
+# COLORS
 # ============================================================
 
-def get_lane_material(
-    lane,
-    is_merge=False,
-):
-    """
-    Return the material associated with a lane.
-
-    Lane 0  -> blue
-    Lane 1  -> green
-    Lane -1 -> orange
-    Merge   -> yellow
-    """
-
-    if is_merge:
-
-        return create_material(
-
-            "Merge",
-
-            (
-                1.0,
-                0.72,
-                0.05,
-                1.0,
-            ),
-        )
-
-
-    lane_colors = {
-
-        0: (
-
-            "Main",
-
-            (
-                0.10,
-                0.40,
-                1.00,
-                1.0,
-            ),
-        ),
-
-        1: (
-
-            "Lane_Positive_1",
-
-            (
-                0.10,
-                0.80,
-                0.25,
-                1.0,
-            ),
-        ),
-
-        -1: (
-
-            "Lane_Negative_1",
-
-            (
-                1.00,
-                0.35,
-                0.05,
-                1.0,
-            ),
-        ),
-
-        2: (
-
-            "Lane_Positive_2",
-
-            (
-                0.60,
-                0.20,
-                0.90,
-                1.0,
-            ),
-        ),
-
-        -2: (
-
-            "Lane_Negative_2",
-
-            (
-                0.05,
-                0.75,
-                0.85,
-                1.0,
-            ),
-        ),
-    }
-
-
-    if lane in lane_colors:
-
-        name, color = lane_colors[
-            lane
-        ]
-
-
-        return create_material(
-
-            name,
-
-            color,
-        )
-
-
-    palette = [
-
-        (
-            0.90,
-            0.15,
-            0.55,
-            1.0,
-        ),
-
-        (
-            0.45,
-            0.75,
-            0.15,
-            1.0,
-        ),
-
-        (
-            0.20,
-            0.55,
-            0.90,
-            1.0,
-        ),
-
-        (
-            0.80,
-            0.35,
-            0.80,
-            1.0,
-        ),
-    ]
-
-
-    color = palette[
-
-        (abs(lane) - 3)
-
-        % len(palette)
-    ]
-
-
-    return create_material(
-
-        f"Lane_{lane}",
-
-        color,
-    )
-
-
-# ============================================================
-# CONNECTION OBJECT
-# ============================================================
-
-def create_curve_object(
-    parent_hash,
-    child_hash,
-    material=None,
-):
-    """
-    Create a Git edge curve and place it in
-    the GitFlowMetro collection.
-    """
-
-    curve_data = bpy.data.curves.new(
-
-        name=(
-
-            f"GitFlowCurve_"
-
-            f"{parent_hash[:7]}_"
-
-            f"{child_hash[:7]}"
-        ),
-
-        type="CURVE",
-    )
-
-
-    curve_data.dimensions = "3D"
-
-    curve_data.resolution_u = 16
-
-    curve_data.bevel_depth = (
-        CONNECTION_RADIUS
-    )
-
-    curve_data.bevel_resolution = 4
-
-
-    curve_object = bpy.data.objects.new(
-
-        (
-
-            f"Connection_"
-
-            f"{parent_hash[:7]}_"
-
-            f"{child_hash[:7]}"
-        ),
-
-        curve_data,
-    )
-
-
-    curve_object[
-        "git_parent_hash"
-    ] = parent_hash
-
-
-    curve_object[
-        "git_child_hash"
-    ] = child_hash
-
-
-    mark_as_gitflow_object(
-        curve_object
-    )
-
-
-    if material is not None:
-
-        curve_data.materials.append(
-            material
-        )
-
-
-    link_object_to_collection(
-
-        curve_object,
-
-        GITFLOW_COLLECTION_NAME,
-    )
-
-
-    return curve_object
-
-
-# ============================================================
-# STRAIGHT CONNECTION
-# ============================================================
-
-def create_straight_connection(
-    start,
-    end,
-    parent_commit,
-    child_commit,
+def get_commit_color(
+    commit,
+    display_mode="ORIGINAL",
 ):
 
-    start_center = Vector(
-        start
+    simulation_type = (
+        get_commit_simulation_type(commit)
     )
 
-    end_center = Vector(
-        end
-    )
+    if simulation_type == "REBASE":
+        return REBASE_COLOR
 
+    if simulation_type == "MERGE":
+        return MERGE_COLOR
 
-    direction = (
+    if str(display_mode).upper() == "REBASE":
+        return REBASE_COLOR
 
-        end_center
+    if get_commit_lane(commit) == 0:
+        return MAIN_COLOR
 
-        - start_center
-    )
-
-
-    if direction.length < 0.000001:
-
-        return
-
-
-    start_surface = get_surface_point(
-
-        start_center,
-
-        direction,
-
-        get_commit_radius(
-            parent_commit
-        ),
-    )
-
-
-    end_surface = get_surface_point(
-
-        end_center,
-
-        -direction,
-
-        get_commit_radius(
-            child_commit
-        ),
-    )
-
-
-    connection_material = (
-        get_lane_material(
-
-            child_commit.branch_level,
-
-            False,
-        )
-    )
-
-
-    curve_object = (
-        create_curve_object(
-
-            parent_commit.hash,
-
-            child_commit.hash,
-
-            connection_material,
-        )
-    )
-
-
-    spline = (
-        curve_object.data.splines.new(
-            "POLY"
-        )
-    )
-
-
-    spline.points.add(1)
-
-
-    spline.points[0].co = (
-
-        start_surface.x,
-
-        start_surface.y,
-
-        start_surface.z,
-
-        1.0,
-    )
-
-
-    spline.points[1].co = (
-
-        end_surface.x,
-
-        end_surface.y,
-
-        end_surface.z,
-
-        1.0,
-    )
+    return FEATURE_COLOR
 
 
 # ============================================================
-# SMOOTH CONNECTION
+# CUBE
 # ============================================================
 
-def create_smooth_connection(
-    start,
-    end,
-    parent_commit,
-    child_commit,
-):
-
-    start_center = Vector(
-        start
-    )
-
-    end_center = Vector(
-        end
-    )
-
-
-    direction = (
-
-        end_center
-
-        - start_center
-    )
-
-
-    if direction.length < 0.000001:
-
-        return
-
-
-    start_surface = get_surface_point(
-
-        start_center,
-
-        direction,
-
-        get_commit_radius(
-            parent_commit
-        ),
-    )
-
-
-    end_surface = get_surface_point(
-
-        end_center,
-
-        -direction,
-
-        get_commit_radius(
-            child_commit
-        ),
-    )
-
-
-    x_distance = abs(
-
-        end_surface.x
-
-        - start_surface.x
-    )
-
-
-    y_distance = abs(
-
-        end_surface.y
-
-        - start_surface.y
-    )
-
-
-    handle_distance = max(
-
-        0.4,
-
-        min(
-
-            1.4,
-
-            x_distance * 0.35
-
-            + y_distance * 0.10,
-        ),
-    )
-
-
-    x_direction = (
-
-        1.0
-
-        if end_surface.x
-        >= start_surface.x
-
-        else -1.0
-    )
-
-
-    connection_material = (
-        get_lane_material(
-
-            child_commit.branch_level,
-
-            False,
-        )
-    )
-
-
-    curve_object = (
-        create_curve_object(
-
-            parent_commit.hash,
-
-            child_commit.hash,
-
-            connection_material,
-        )
-    )
-
-
-    spline = (
-        curve_object.data.splines.new(
-            "BEZIER"
-        )
-    )
-
-
-    spline.bezier_points.add(1)
-
-
-    first_point = (
-        spline.bezier_points[0]
-    )
-
-
-    first_point.co = (
-        start_surface
-    )
-
-
-    first_point.handle_left_type = (
-        "FREE"
-    )
-
-    first_point.handle_right_type = (
-        "FREE"
-    )
-
-
-    first_point.handle_left = (
-
-        start_surface
-
-        - Vector((
-
-            x_direction
-            * handle_distance,
-
-            0.0,
-
-            0.0,
-        ))
-    )
-
-
-    first_point.handle_right = (
-
-        start_surface
-
-        + Vector((
-
-            x_direction
-            * handle_distance,
-
-            0.0,
-
-            0.0,
-        ))
-    )
-
-
-    second_point = (
-        spline.bezier_points[1]
-    )
-
-
-    second_point.co = (
-        end_surface
-    )
-
-
-    second_point.handle_left_type = (
-        "FREE"
-    )
-
-    second_point.handle_right_type = (
-        "FREE"
-    )
-
-
-    second_point.handle_left = (
-
-        end_surface
-
-        - Vector((
-
-            x_direction
-            * handle_distance,
-
-            0.0,
-
-            0.0,
-        ))
-    )
-
-
-    second_point.handle_right = (
-
-        end_surface
-
-        + Vector((
-
-            x_direction
-            * handle_distance,
-
-            0.0,
-
-            0.0,
-        ))
-    )
-
-
-# ============================================================
-# CONNECTION DISPATCH
-# ============================================================
-
-def create_connection(
-    start,
-    end,
-    parent_commit,
-    child_commit,
-):
-
-    same_lane = (
-
-        parent_commit.branch_level
-
-        == child_commit.branch_level
-    )
-
-
-    if same_lane:
-
-        create_straight_connection(
-
-            start,
-
-            end,
-
-            parent_commit,
-
-            child_commit,
-        )
-
-
-    else:
-
-        create_smooth_connection(
-
-            start,
-
-            end,
-
-            parent_commit,
-
-            child_commit,
-        )
-
-
-# ============================================================
-# BANNER INFORMATION
-# ============================================================
-
-def get_banner_height(
-    commit_object,
-):
-
-    is_merge = commit_object.get(
-
-        "git_is_merge",
-
-        False,
-    )
-
-
-    child_count = commit_object.get(
-
-        "git_child_count",
-
-        0,
-    )
-
-
-    if is_merge or child_count > 1:
-
-        return SPECIAL_BANNER_HEIGHT
-
-
-    return NORMAL_BANNER_HEIGHT
-
-
-def format_banner_text(
-    commit_object,
-):
-
-    commit_id = commit_object.get(
-
-        "git_hash",
-
-        "",
-    )[:7]
-
-
-    name = commit_object.get(
-
-        "git_message",
-
-        "",
-    )
-
-
-    author_name = commit_object.get(
-
-        "git_author",
-
-        "",
-    )
-
-
-    date = commit_object.get(
-
-        "git_date",
-
-        "",
-    )
-
-
-    lane = commit_object.get(
-
-        "git_lane",
-
-        0,
-    )
-
-
-    is_merge = commit_object.get(
-
-        "git_is_merge",
-
-        False,
-    )
-
-
-    parent_count = commit_object.get(
-
-        "git_parent_count",
-
-        0,
-    )
-
-
-    child_count = commit_object.get(
-
-        "git_child_count",
-
-        0,
-    )
-
-
-    parents = commit_object.get(
-
-        "git_parents",
-
-        "",
-    )
-
-
-    children = commit_object.get(
-
-        "git_children",
-
-        "",
-    )
-
-
-    lines = [
-
-        "COMMIT INFORMATION",
-
-        "",
-
-        f"Commit ID: {commit_id}",
-
-        f"Name: {name}",
-
-        f"Author Name: {author_name}",
-
-        f"Date: {date}",
-    ]
-
-
-    if is_merge:
-
-        parent_ids = [
-
-            parent_hash[:7]
-
-            for parent_hash
-            in parents.split(", ")
-
-            if parent_hash
-        ]
-
-
-        lines.extend([
-
-            "",
-
-            "Type: Merge Commit",
-
-            f"Merged Parents: {parent_count}",
-
-            (
-
-                "Parent Commit IDs: "
-
-                + ", ".join(
-                    parent_ids
-                )
-            ),
-
-            f"Result Lane: {lane}",
-        ])
-
-
-    elif child_count > 1:
-
-        child_ids = [
-
-            child_hash[:7]
-
-            for child_hash
-            in children.split(", ")
-
-            if child_hash
-        ]
-
-
-        lines.extend([
-
-            "",
-
-            "Type: Branch Point",
-
-            f"Outgoing Paths: {child_count}",
-
-            (
-
-                "Child Commit IDs: "
-
-                + ", ".join(
-                    child_ids
-                )
-            ),
-
-            f"Source Lane: {lane}",
-        ])
-
-
-    else:
-
-        lines.extend([
-
-            "",
-
-            "Type: Normal Commit",
-
-            f"Lane: {lane}",
-        ])
-
-
-    return "\n".join(
-        lines
-    )
-
-
-# ============================================================
-# BANNER CONNECTOR
-# ============================================================
-
-def create_banner_connector(
-    commit_object,
-    banner_center,
-    banner_height,
-):
-    """
-    Create one straight diagonal connector from
-    the selected sphere to the information board.
-    """
-
-    commit_location = Vector(
-        commit_object.location
-    )
-
-
-    is_merge = commit_object.get(
-
-        "git_is_merge",
-
-        False,
-    )
-
-
-    visible_radius = (
-
-        SPHERE_RADIUS * MERGE_SCALE
-
-        if is_merge
-
-        else SPHERE_RADIUS
-    )
-
-
-    # Bottom-left edge of board.
-
-    target = Vector((
-
-        banner_center.x
-
-        - BANNER_WIDTH / 2.0
-
-        + 0.10,
-
-
-        banner_center.y,
-
-
-        banner_center.z
-
-        - banner_height / 2.0
-
-        + 0.10,
-    ))
-
-
-    direction = (
-
-        target
-
-        - commit_location
-    )
-
-
-    if direction.length < 0.000001:
-
-        return
-
-
-    direction.normalize()
-
-
-    start = (
-
-        commit_location
-
-        + direction
-        * visible_radius
-    )
-
-
-    curve_data = bpy.data.curves.new(
-
-        "CommitInfoConnectorCurve",
-
-        type="CURVE",
-    )
-
-
-    curve_data.dimensions = "3D"
-
-    curve_data.bevel_depth = 0.025
-
-    curve_data.bevel_resolution = 3
-
-
-    connector_material = create_material(
-
-        "CommitInfoConnectorMaterial",
-
-        (
-            0.75,
-            0.82,
-            0.90,
-            1.0,
-        ),
-    )
-
-
-    curve_data.materials.append(
-        connector_material
-    )
-
-
-    spline = curve_data.splines.new(
-        "POLY"
-    )
-
-
-    spline.points.add(1)
-
-
-    spline.points[0].co = (
-
-        start.x,
-
-        start.y,
-
-        start.z,
-
-        1.0,
-    )
-
-
-    spline.points[1].co = (
-
-        target.x,
-
-        target.y,
-
-        target.z,
-
-        1.0,
-    )
-
-
-    connector = bpy.data.objects.new(
-
-        "CommitInfo_Connector",
-
-        curve_data,
-    )
-
-
-    mark_as_banner_object(
-        connector
-    )
-
-
-    link_object_to_collection(
-
-        connector,
-
-        GITFLOW_INFO_COLLECTION_NAME,
-    )
-
-
-# ============================================================
-# BANNER BACKGROUND
-# ============================================================
-
-def create_banner_background(
-    banner_center,
-    banner_height,
+def create_cube(
+    name,
+    location,
+    scale,
+    material,
+    *,
+    information_type=None,
+    object_prefix="",
+    information_root=False,
 ):
 
     bpy.ops.mesh.primitive_cube_add(
-
-        location=banner_center,
-
-        scale=(
-
-            BANNER_WIDTH / 2.0,
-
-            0.035,
-
-            banner_height / 2.0,
-        ),
+        location=location
     )
 
+    obj = bpy.context.active_object
 
-    background = (
-        bpy.context.object
+    obj.name = name
+    obj.scale = scale
+
+    bpy.ops.object.transform_apply(
+        location=False,
+        rotation=False,
+        scale=True,
     )
 
+    mark_as_gitflow_object(obj)
 
-    background.name = (
-        "CommitInfo_Background"
-    )
+    if information_type is not None:
 
+        mark_information_object(
+            obj,
+            information_type,
+            object_prefix,
+            is_root=information_root,
+        )
 
-    mark_as_banner_object(
-        background
-    )
+    obj.data.materials.append(material)
 
-
-    link_object_to_collection(
-
-        background,
-
-        GITFLOW_INFO_COLLECTION_NAME,
-    )
-
-
-    background_material = create_material(
-
-        "CommitInfoBackground",
-
-        (
-            0.04,
-            0.08,
-            0.12,
-            1.0,
-        ),
-
-        alpha=0.55,
-    )
-
-
-    background.data.materials.append(
-        background_material
-    )
+    return obj
 
 
 # ============================================================
-# BANNER TEXT
+# TEXT OBJECT
 # ============================================================
 
-def create_banner_text(
-    commit_object,
-    banner_center,
-    banner_height,
+def create_text_object(
+    name,
+    body,
+    location,
+    size,
+    material,
+    *,
+    align_x="LEFT",
+    align_y="CENTER",
+    information_type=None,
+    object_prefix="",
 ):
 
-    text_data = bpy.data.curves.new(
-
-        "CommitInfoTextCurve",
-
+    curve = bpy.data.curves.new(
+        name=name + "_Curve",
         type="FONT",
     )
 
+    curve.body = str(body)
 
-    text_data.body = (
-        format_banner_text(
-            commit_object
+    curve.align_x = align_x
+    curve.align_y = align_y
+
+    curve.size = size
+
+    curve.extrude = 0.002
+    curve.bevel_depth = 0.0006
+
+    obj = bpy.data.objects.new(
+        name,
+        curve,
+    )
+
+    bpy.context.collection.objects.link(obj)
+
+    obj.location = Vector(location)
+
+    mark_as_gitflow_object(obj)
+
+    if information_type is not None:
+
+        mark_information_object(
+            obj,
+            information_type,
+            object_prefix,
+            is_root=False,
         )
-    )
 
+    obj.data.materials.append(material)
 
-    text_data.align_x = "LEFT"
-
-    text_data.align_y = "TOP"
-
-    text_data.size = 0.19
-
-    text_data.space_line = 1.08
-
-    text_data.extrude = 0.003
-
-    text_data.bevel_depth = 0.001
-
-
-    text_object = bpy.data.objects.new(
-
-        "CommitInfo_Text",
-
-        text_data,
-    )
-
-
-    text_object.location = (
-
-        banner_center.x
-
-        - BANNER_WIDTH / 2.0
-
-        + 0.20,
-
-
-        banner_center.y
-
-        - 0.045,
-
-
-        banner_center.z
-
-        + banner_height / 2.0
-
-        - 0.18,
-    )
-
-
-    text_object.rotation_euler = (
-
-        1.57079632679,
-
-        0.0,
-
-        0.0,
-    )
-
-
-    mark_as_banner_object(
-        text_object
-    )
-
-
-    text_material = create_material(
-
-        "CommitInfoText",
-
-        (
-            0.95,
-            0.98,
-            1.0,
-            1.0,
-        ),
-    )
-
-
-    text_object.data.materials.append(
-        text_material
-    )
-
-
-    link_object_to_collection(
-
-        text_object,
-
-        GITFLOW_INFO_COLLECTION_NAME,
-    )
+    return obj
 
 
 # ============================================================
-# SHOW COMMIT INFORMATION
+# CYLINDER
 # ============================================================
 
-def show_commit_information(
-    commit_object,
+def create_cylinder_between_points(
+    name,
+    start,
+    end,
+    radius,
+    material,
+    *,
+    information_type=None,
+    object_prefix="",
 ):
 
-    hide_commit_information()
+    start = Vector(start)
+    end = Vector(end)
 
+    direction = end - start
 
-    commit_location = Vector(
-        commit_object.location
+    length = direction.length
+
+    if length < 0.000001:
+        return None
+
+    midpoint = (
+        start + end
+    ) / 2.0
+
+    bpy.ops.mesh.primitive_cylinder_add(
+        vertices=20,
+        radius=radius,
+        depth=length,
+        location=midpoint,
     )
 
+    obj = bpy.context.active_object
 
-    banner_height = get_banner_height(
-        commit_object
+    obj.name = name
+
+    obj.rotation_euler = (
+        direction.to_track_quat(
+            "Z",
+            "Y",
+        ).to_euler()
     )
 
+    mark_as_gitflow_object(obj)
 
-    banner_center = Vector((
+    if information_type is not None:
 
-        commit_location.x
+        mark_information_object(
+            obj,
+            information_type,
+            object_prefix,
+            is_root=False,
+        )
 
-        + BANNER_X_OFFSET
+    obj.data.materials.append(material)
 
-        + BANNER_WIDTH / 2.0,
-
-
-        commit_location.y,
-
-
-        commit_location.z
-
-        + BANNER_Z_OFFSET
-
-        + (
-
-            banner_height
-
-            - NORMAL_BANNER_HEIGHT
-
-        ) / 2.0,
-    ))
+    return obj
 
 
-    create_banner_connector(
+# ============================================================
+# SPHERE SURFACE
+# ============================================================
 
-        commit_object,
+def calculate_surface_points(
+    start,
+    end,
+    radius=SPHERE_RADIUS,
+):
 
-        banner_center,
+    start = Vector(start)
+    end = Vector(end)
 
-        banner_height,
-    )
+    direction = end - start
 
+    if direction.length < 0.000001:
+        return start, end
 
-    create_banner_background(
+    direction.normalize()
 
-        banner_center,
-
-        banner_height,
-    )
-
-
-    create_banner_text(
-
-        commit_object,
-
-        banner_center,
-
-        banner_height,
+    return (
+        start + direction * radius,
+        end - direction * radius,
     )
 
 
 # ============================================================
-# REPOSITORY VISUALIZATION
+# COMMIT SPHERES
+# ============================================================
+
+def create_commit_spheres(
+    repository,
+    positions,
+    *,
+    object_prefix="",
+    display_mode="ORIGINAL",
+):
+
+    for commit in get_repository_commits(repository):
+
+        commit_hash = get_commit_hash(commit)
+
+        if commit_hash not in positions:
+            continue
+
+        material = create_material(
+            object_prefix
+            + "Commit_Material_"
+            + commit_hash[:8],
+            get_commit_color(
+                commit,
+                display_mode,
+            ),
+            metallic=0.22,
+            roughness=0.30,
+        )
+
+        bpy.ops.mesh.primitive_uv_sphere_add(
+            segments=32,
+            ring_count=16,
+            radius=SPHERE_RADIUS,
+            location=positions[commit_hash],
+        )
+
+        sphere = bpy.context.active_object
+
+        sphere.name = (
+            object_prefix
+            + "Commit_"
+            + commit_hash
+        )
+
+        sphere[COMMIT_HASH_TAG] = commit_hash
+        sphere["commit_hash"] = commit_hash
+
+        mark_as_gitflow_object(sphere)
+
+        sphere.data.materials.append(material)
+
+    print("Spheres created")
+
+
+# ============================================================
+# CONNECTIONS
+# ============================================================
+
+def create_connections(
+    repository,
+    positions,
+    *,
+    object_prefix="",
+    display_mode="ORIGINAL",
+):
+
+    commit_lookup = {
+        get_commit_hash(commit): commit
+        for commit in get_repository_commits(repository)
+    }
+
+    connection_number = 0
+
+    for commit in get_repository_commits(repository):
+
+        commit_hash = get_commit_hash(commit)
+
+        if commit_hash not in positions:
+            continue
+
+        child_position = positions[commit_hash]
+
+        for parent_hash in get_commit_parents(commit):
+
+            parent_hash = str(parent_hash)
+
+            if parent_hash not in positions:
+                continue
+
+            parent_position = positions[parent_hash]
+
+            start, end = calculate_surface_points(
+                parent_position,
+                child_position,
+            )
+
+            parent_commit = commit_lookup.get(
+                parent_hash,
+                commit,
+            )
+
+            material = create_material(
+                object_prefix
+                + "Connection_Material_"
+                + str(connection_number),
+                get_commit_color(
+                    parent_commit,
+                    display_mode,
+                ),
+                metallic=0.15,
+                roughness=0.35,
+            )
+
+            create_cylinder_between_points(
+                object_prefix
+                + "Connection_"
+                + str(connection_number),
+                start,
+                end,
+                LINE_RADIUS,
+                material,
+            )
+
+            connection_number += 1
+
+    print("Connections created")
+
+
+# ============================================================
+# VISUALIZE REPOSITORY
 # ============================================================
 
 def visualize_repository(
     repository,
     positions,
+    *,
+    clear_existing=True,
+    object_prefix="",
+    display_mode="ORIGINAL",
+    **kwargs,
 ):
 
-    print(
-        "Visualization started"
-    )
+    if clear_existing:
+        clear_gitflow_scene()
 
+    print("Visualization started")
 
-    lookup = {
-
-        commit.hash: commit
-
-        for commit
-        in repository.commits
-    }
-
-
-    # ========================================================
-    # COMMIT SPHERES
-    # ========================================================
-
-    for commit in repository.commits:
-
-
-        position = positions[
-            commit.hash
-        ]
-
+    for commit_hash, position in positions.items():
 
         print(
-
-            commit.hash[:7],
-
+            commit_hash,
             "position:",
-
             position,
         )
 
+    create_commit_spheres(
+        repository,
+        positions,
+        object_prefix=object_prefix,
+        display_mode=display_mode,
+    )
 
-        bpy.ops.mesh.primitive_uv_sphere_add(
+    create_connections(
+        repository,
+        positions,
+        object_prefix=object_prefix,
+        display_mode=display_mode,
+    )
 
-            radius=SPHERE_RADIUS,
-
-            location=position,
-        )
-
-
-        obj = (
-            bpy.context.object
-        )
-
-
-        obj.name = (
-
-            f"Commit_"
-
-            f"{commit.hash[:7]}"
-        )
+    return positions
 
 
-        mark_as_gitflow_object(
-            obj
-        )
+def create_visualization(
+    repository,
+    positions,
+    *,
+    clear_existing=True,
+    object_prefix="",
+    display_mode="ORIGINAL",
+    **kwargs,
+):
 
-
-        link_object_to_collection(
-
-            obj,
-
-            GITFLOW_COLLECTION_NAME,
-        )
-
-
-        # ----------------------------------------------------
-        # COMMIT METADATA
-        # ----------------------------------------------------
-
-        obj["git_hash"] = (
-            commit.hash
-        )
-
-
-        obj["git_author"] = (
-            commit.author
-        )
-
-
-        obj["git_date"] = (
-            commit.date
-        )
-
-
-        obj["git_message"] = (
-            commit.message
-        )
-
-
-        obj["git_parents"] = ", ".join(
-            commit.parents
-        )
-
-
-        obj["git_children"] = ", ".join(
-            commit.children
-        )
-
-
-        obj["git_parent_count"] = len(
-            commit.parents
-        )
-
-
-        obj["git_child_count"] = len(
-            commit.children
-        )
-
-
-        obj["git_lane"] = (
-            commit.branch_level
-        )
-
-
-        obj["git_is_merge"] = (
-            commit.is_merge
-        )
-
-
-        # ----------------------------------------------------
-        # MATERIAL
-        # ----------------------------------------------------
-
-        commit_material = (
-            get_lane_material(
-
-                commit.branch_level,
-
-                commit.is_merge,
-            )
-        )
-
-
-        obj.data.materials.append(
-            commit_material
-        )
-
-
-        # ----------------------------------------------------
-        # MERGE SIZE
-        # ----------------------------------------------------
-
-        if commit.is_merge:
-
-            obj.scale = (
-
-                MERGE_SCALE,
-
-                MERGE_SCALE,
-
-                MERGE_SCALE,
-            )
-
-
-    print(
-        "Spheres created"
+    return visualize_repository(
+        repository,
+        positions,
+        clear_existing=clear_existing,
+        object_prefix=object_prefix,
+        display_mode=display_mode,
+        **kwargs,
     )
 
 
-    # ========================================================
-    # CONNECTIONS
-    # ========================================================
+# ============================================================
+# REMOVE INFORMATION
+# ============================================================
 
-    for parent_commit in (
-        repository.commits
+def remove_information_objects(
+    information_type=None,
+    object_prefix=None,
+):
+
+    objects_to_remove = []
+
+    for obj in bpy.data.objects:
+
+        if not obj.get(
+            INFORMATION_OBJECT_TAG,
+            False,
+        ):
+            continue
+
+        if (
+            information_type is not None
+            and obj.get(
+                INFORMATION_TYPE_TAG,
+                "",
+            ) != information_type
+        ):
+            continue
+
+        if (
+            object_prefix is not None
+            and obj.get(
+                INFORMATION_PREFIX_TAG,
+                "",
+            ) != object_prefix
+        ):
+            continue
+
+        objects_to_remove.append(obj)
+
+    objects_to_remove.sort(
+        key=lambda obj: (
+            0
+            if obj.parent is not None
+            else 1
+        )
+    )
+
+    for obj in objects_to_remove:
+
+        if obj.name in bpy.data.objects:
+
+            bpy.data.objects.remove(
+                obj,
+                do_unlink=True,
+            )
+
+
+# ============================================================
+# BOARD ORIENTATION
+# ============================================================
+
+def copy_camera_orientation(
+    board,
+    camera,
+):
+
+    if board is None or camera is None:
+        return
+
+    board.rotation_euler = (
+        camera.rotation_euler.copy()
+    )
+
+
+def refresh_information_board_orientation(
+    camera=None,
+):
+
+    if camera is None:
+        camera = bpy.context.scene.camera
+
+    if camera is None:
+        return
+
+    for obj in bpy.data.objects:
+
+        if not obj.get(
+            INFORMATION_OBJECT_TAG,
+            False,
+        ):
+            continue
+
+        if not obj.get(
+            INFORMATION_ROOT_TAG,
+            False,
+        ):
+            continue
+
+        copy_camera_orientation(
+            obj,
+            camera,
+        )
+
+
+# ============================================================
+# BOARD CHILD HELPERS
+# ============================================================
+
+def create_board_text(
+    board,
+    name,
+    body,
+    local_x,
+    local_y,
+    size,
+    material,
+    *,
+    information_type,
+    object_prefix="",
+):
+
+    if information_type == "SELECTED":
+
+        front_z = (
+            SELECTED_PANEL_DEPTH / 2.0
+            + 0.012
+        )
+
+    else:
+
+        front_z = (
+            ALL_LABEL_DEPTH / 2.0
+            + 0.010
+        )
+
+    text = create_text_object(
+        name,
+        body,
+        (0.0, 0.0, 0.0),
+        size,
+        material,
+        information_type=information_type,
+        object_prefix=object_prefix,
+    )
+
+    text.parent = board
+
+    text.matrix_parent_inverse.identity()
+
+    text.location = Vector(
+        (
+            local_x,
+            local_y,
+            front_z,
+        )
+    )
+
+    text.rotation_euler = (
+        0.0,
+        0.0,
+        0.0,
+    )
+
+    return text
+
+
+def create_board_accent(
+    board,
+    name,
+    local_start,
+    local_end,
+    radius,
+    material,
+    *,
+    information_type,
+    object_prefix="",
+):
+
+    world_start = (
+        board.matrix_world
+        @ Vector(local_start)
+    )
+
+    world_end = (
+        board.matrix_world
+        @ Vector(local_end)
+    )
+
+    accent = create_cylinder_between_points(
+        name,
+        world_start,
+        world_end,
+        radius,
+        material,
+        information_type=information_type,
+        object_prefix=object_prefix,
+    )
+
+    return accent
+
+
+# ============================================================
+# SELECTED COMMIT
+# ============================================================
+
+def get_selected_commit_hash(context):
+
+    selected_object = getattr(
+        context,
+        "active_object",
+        None,
+    )
+
+    if selected_object is None:
+        return None
+
+    commit_hash = selected_object.get(
+        COMMIT_HASH_TAG,
+        None,
+    )
+
+    if commit_hash is None:
+
+        commit_hash = selected_object.get(
+            "commit_hash",
+            None,
+        )
+
+    if commit_hash is None:
+        return None
+
+    return str(commit_hash)
+
+
+# ============================================================
+# GRAPH BOUNDS
+# ============================================================
+
+def calculate_positions_bounds(positions):
+
+    coordinates = [
+        Vector(position)
+        for position in positions.values()
+    ]
+
+    if not coordinates:
+        return None
+
+    return (
+        min(p.x for p in coordinates),
+        max(p.x for p in coordinates),
+        min(p.y for p in coordinates),
+        max(p.y for p in coordinates),
+        min(p.z for p in coordinates),
+        max(p.z for p in coordinates),
+    )
+
+
+# ============================================================
+# SELECTED PANEL POSITION
+# ============================================================
+
+def calculate_selected_panel_position(
+    positions,
+    camera,
+):
+
+    bounds = calculate_positions_bounds(positions)
+
+    if bounds is None:
+        return Vector((0.0, 0.0, 3.0))
+
+    (
+        min_x,
+        max_x,
+        min_y,
+        max_y,
+        min_z,
+        max_z,
+    ) = bounds
+
+    center_x = (
+        min_x + max_x
+    ) / 2.0
+
+    center_y = (
+        min_y + max_y
+    ) / 2.0
+
+    return Vector(
+        (
+            center_x,
+            center_y,
+            max_z + 4.4,
+        )
+    )
+
+
+# ============================================================
+# SELECTED COMMIT INFORMATION
+# ============================================================
+
+def show_selected_commit_information(
+    context,
+    repository,
+    positions,
+    object_prefix="",
+    **kwargs,
+):
+
+    commit_hash = get_selected_commit_hash(context)
+
+    if commit_hash is None:
+        return False
+
+    commit = find_commit(
+        repository,
+        commit_hash,
+    )
+
+    if commit is None:
+        return False
+
+    camera = context.scene.camera
+
+    if camera is None:
+        return False
+
+    remove_information_objects(
+        information_type="SELECTED",
+    )
+
+    panel_position = (
+        calculate_selected_panel_position(
+            positions,
+            camera,
+        )
+    )
+
+    panel_material = create_material(
+        "GitFlow_Selected_Panel_Material",
+        SELECTED_PANEL_COLOR,
+        metallic=0.16,
+        roughness=0.30,
+    )
+
+    border_material = create_material(
+        "GitFlow_Selected_Border_Material",
+        SELECTED_PANEL_BORDER_COLOR,
+        roughness=0.22,
+        emission_strength=0.25,
+    )
+
+    title_material = create_material(
+        "GitFlow_Selected_Title_Material",
+        SELECTED_TITLE_COLOR,
+        roughness=0.22,
+        emission_strength=0.18,
+    )
+
+    label_material = create_material(
+        "GitFlow_Selected_Label_Material",
+        SELECTED_LABEL_COLOR,
+        roughness=0.28,
+    )
+
+    text_material = create_material(
+        "GitFlow_Selected_Text_Material",
+        SELECTED_TEXT_COLOR,
+        roughness=0.34,
+    )
+
+    panel = create_cube(
+        "GitFlow_Commit_Info_"
+        + object_prefix
+        + commit_hash
+        + "_Board",
+        panel_position,
+        (
+            SELECTED_PANEL_WIDTH / 2.0,
+            SELECTED_PANEL_HEIGHT / 2.0,
+            SELECTED_PANEL_DEPTH / 2.0,
+        ),
+        panel_material,
+        information_type="SELECTED",
+        object_prefix=object_prefix,
+        information_root=True,
+    )
+
+    copy_camera_orientation(
+        panel,
+        camera,
+    )
+
+    create_board_text(
+        panel,
+        "GitFlow_Selected_Title_"
+        + commit_hash,
+        "COMMIT INFORMATION",
+        -2.20,
+        1.22,
+        0.28,
+        title_material,
+        information_type="SELECTED",
+        object_prefix=object_prefix,
+    )
+
+    create_board_accent(
+        panel,
+        "GitFlow_Selected_Accent_"
+        + commit_hash,
+        (
+            -2.20,
+            0.94,
+            SELECTED_PANEL_DEPTH / 2.0
+            + 0.014,
+        ),
+        (
+            2.20,
+            0.94,
+            SELECTED_PANEL_DEPTH / 2.0
+            + 0.014,
+        ),
+        0.014,
+        border_material,
+        information_type="SELECTED",
+        object_prefix=object_prefix,
+    )
+
+    simulation_type = (
+        get_commit_simulation_type(commit)
+    )
+
+    original_hash = (
+        get_original_commit_hash(commit)
+    )
+
+    rows = [
+        (
+            "COMMIT ID",
+            get_commit_hash(commit)[:10],
+        ),
+        (
+            "AUTHOR",
+            shorten_text(
+                get_commit_author(commit),
+                32,
+            ),
+        ),
+        (
+            "DATE",
+            clean_date(
+                get_commit_date(commit)
+            ),
+        ),
+        (
+            "MESSAGE",
+            shorten_text(
+                get_commit_message(commit),
+                42,
+            ),
+        ),
+        (
+            "TYPE",
+            simulation_type,
+        ),
+    ]
+
+    if original_hash:
+
+        rows.append(
+            (
+                "ORIGINAL",
+                original_hash[:10],
+            )
+        )
+
+    start_y = 0.65
+    row_spacing = 0.36
+
+    for index, (
+        label,
+        value,
+    ) in enumerate(rows):
+
+        local_y = (
+            start_y
+            - index * row_spacing
+        )
+
+        create_board_text(
+            panel,
+            "GitFlow_Selected_Label_"
+            + str(index)
+            + "_"
+            + commit_hash,
+            label,
+            -2.20,
+            local_y,
+            0.16,
+            label_material,
+            information_type="SELECTED",
+            object_prefix=object_prefix,
+        )
+
+        create_board_text(
+            panel,
+            "GitFlow_Selected_Value_"
+            + str(index)
+            + "_"
+            + commit_hash,
+            value,
+            -0.72,
+            local_y,
+            0.18,
+            text_material,
+            information_type="SELECTED",
+            object_prefix=object_prefix,
+        )
+
+    return True
+
+
+def hide_selected_commit_information(
+    context=None,
+    object_prefix=None,
+    **kwargs,
+):
+
+    remove_information_objects(
+        information_type="SELECTED",
+    )
+
+    return True
+
+
+# ============================================================
+# ALL INFORMATION LAYOUT
+# ============================================================
+
+def get_sorted_visible_commits(
+    repository,
+    positions,
+):
+
+    commits = [
+        commit
+        for commit in get_repository_commits(repository)
+        if get_commit_hash(commit) in positions
+    ]
+
+    commits.sort(
+        key=lambda commit: (
+            positions[
+                get_commit_hash(commit)
+            ][0],
+            positions[
+                get_commit_hash(commit)
+            ][1],
+        )
+    )
+
+    return commits
+
+
+def calculate_all_label_positions(
+    repository,
+    positions,
+):
+
+    commits = get_sorted_visible_commits(
+        repository,
+        positions,
+    )
+
+    if not commits:
+        return {}
+
+    bounds = calculate_positions_bounds(positions)
+
+    (
+        min_x,
+        max_x,
+        min_y,
+        max_y,
+        min_z,
+        max_z,
+    ) = bounds
+
+    row_one_z = max_z + 2.60
+    row_two_z = max_z + 4.70
+
+    left_margin = min_x + 0.25
+    right_margin = max_x - 0.25
+
+    graph_width = max(
+        right_margin - left_margin,
+        1.0,
+    )
+
+    row_one = commits[::2]
+    row_two = commits[1::2]
+
+    result = {}
+
+    for row_index, row_commits in enumerate(
+        (
+            row_one,
+            row_two,
+        )
     ):
 
+        if not row_commits:
+            continue
 
-        start_position = positions[
-            parent_commit.hash
-        ]
+        row_z = (
+            row_one_z
+            if row_index == 0
+            else row_two_z
+        )
 
+        if len(row_commits) == 1:
 
-        for child_hash in (
-            parent_commit.children
-        ):
-
-
-            if child_hash not in positions:
-
-                continue
-
-
-            child_commit = lookup.get(
-                child_hash
-            )
-
-
-            if child_commit is None:
-
-                continue
-
-
-            end_position = positions[
-                child_hash
+            x_positions = [
+                (
+                    min_x + max_x
+                ) / 2.0
             ]
 
+        else:
 
-            create_connection(
-
-                start_position,
-
-                end_position,
-
-                parent_commit,
-
-                child_commit,
+            spacing = (
+                graph_width
+                / (
+                    len(row_commits)
+                    - 1
+                )
             )
 
+            x_positions = [
+                left_margin
+                + index * spacing
+                for index in range(
+                    len(row_commits)
+                )
+            ]
 
-    print(
-        "Connections created"
+        for commit, x_position in zip(
+            row_commits,
+            x_positions,
+        ):
+
+            commit_hash = get_commit_hash(commit)
+
+            node = Vector(
+                positions[commit_hash]
+            )
+
+            result[commit_hash] = Vector(
+                (
+                    x_position,
+                    node.y,
+                    row_z,
+                )
+            )
+
+    return result
+
+
+# ============================================================
+# ALL COMMIT INFORMATION
+# ============================================================
+
+def show_all_commit_information(
+    context,
+    repository,
+    positions,
+    object_prefix="",
+    **kwargs,
+):
+
+    camera = context.scene.camera
+
+    if camera is None:
+        return 0
+
+    remove_information_objects(
+        information_type="ALL",
     )
+
+    panel_material = create_material(
+        "GitFlow_All_Label_Material",
+        ALL_LABEL_COLOR,
+        metallic=0.12,
+        roughness=0.32,
+    )
+
+    border_material = create_material(
+        "GitFlow_All_Label_Border_Material",
+        ALL_LABEL_BORDER_COLOR,
+        roughness=0.24,
+        emission_strength=0.18,
+    )
+
+    title_material = create_material(
+        "GitFlow_All_Label_Title_Material",
+        ALL_LABEL_TITLE_COLOR,
+        roughness=0.26,
+        emission_strength=0.12,
+    )
+
+    text_material = create_material(
+        "GitFlow_All_Label_Text_Material",
+        ALL_LABEL_TEXT_COLOR,
+        roughness=0.34,
+    )
+
+    leader_material = create_material(
+        "GitFlow_All_Leader_Material",
+        LEADER_LINE_COLOR,
+        metallic=0.05,
+        roughness=0.30,
+    )
+
+    label_positions = (
+        calculate_all_label_positions(
+            repository,
+            positions,
+        )
+    )
+
+    displayed_count = 0
+
+    for commit in get_sorted_visible_commits(
+        repository,
+        positions,
+    ):
+
+        commit_hash = get_commit_hash(commit)
+
+        if commit_hash not in label_positions:
+            continue
+
+        node_position = Vector(
+            positions[commit_hash]
+        )
+
+        panel_position = label_positions[
+            commit_hash
+        ]
+
+        panel = create_cube(
+            "GitFlow_All_Info_"
+            + object_prefix
+            + commit_hash
+            + "_Board",
+            panel_position,
+            (
+                ALL_LABEL_WIDTH / 2.0,
+                ALL_LABEL_HEIGHT / 2.0,
+                ALL_LABEL_DEPTH / 2.0,
+            ),
+            panel_material,
+            information_type="ALL",
+            object_prefix=object_prefix,
+            information_root=True,
+        )
+
+        copy_camera_orientation(
+            panel,
+            camera,
+        )
+
+        leader_end = (
+            panel_position
+            - Vector(
+                (
+                    0.0,
+                    0.0,
+                    ALL_LABEL_HEIGHT / 2.0
+                    + 0.15,
+                )
+            )
+        )
+
+        start, end = calculate_surface_points(
+            node_position,
+            leader_end,
+            SPHERE_RADIUS,
+        )
+
+        create_cylinder_between_points(
+            "GitFlow_All_Leader_"
+            + object_prefix
+            + commit_hash,
+            start,
+            end,
+            0.025,
+            leader_material,
+            information_type="ALL",
+            object_prefix=object_prefix,
+        )
+
+        simulation_type = (
+            get_commit_simulation_type(commit)
+        )
+
+        create_board_text(
+            panel,
+            "GitFlow_All_ID_"
+            + object_prefix
+            + commit_hash,
+            "COMMIT  "
+            + commit_hash[:7],
+            -1.30,
+            0.66,
+            0.17,
+            title_material,
+            information_type="ALL",
+            object_prefix=object_prefix,
+        )
+
+        create_board_accent(
+            panel,
+            "GitFlow_All_Accent_"
+            + object_prefix
+            + commit_hash,
+            (
+                -1.30,
+                0.44,
+                ALL_LABEL_DEPTH / 2.0
+                + 0.012,
+            ),
+            (
+                1.30,
+                0.44,
+                ALL_LABEL_DEPTH / 2.0
+                + 0.012,
+            ),
+            0.010,
+            border_material,
+            information_type="ALL",
+            object_prefix=object_prefix,
+        )
+
+        create_board_text(
+            panel,
+            "GitFlow_All_Author_"
+            + object_prefix
+            + commit_hash,
+            "AUTHOR   "
+            + shorten_text(
+                get_commit_author(commit),
+                22,
+            ),
+            -1.30,
+            0.23,
+            0.13,
+            text_material,
+            information_type="ALL",
+            object_prefix=object_prefix,
+        )
+
+        create_board_text(
+            panel,
+            "GitFlow_All_Date_"
+            + object_prefix
+            + commit_hash,
+            "DATE     "
+            + clean_date(
+                get_commit_date(commit)
+            ),
+            -1.30,
+            -0.02,
+            0.125,
+            text_material,
+            information_type="ALL",
+            object_prefix=object_prefix,
+        )
+
+        create_board_text(
+            panel,
+            "GitFlow_All_Message_"
+            + object_prefix
+            + commit_hash,
+            "MESSAGE  "
+            + shorten_text(
+                get_commit_message(commit),
+                26,
+            ),
+            -1.30,
+            -0.27,
+            0.125,
+            text_material,
+            information_type="ALL",
+            object_prefix=object_prefix,
+        )
+
+        create_board_text(
+            panel,
+            "GitFlow_All_Type_"
+            + object_prefix
+            + commit_hash,
+            "TYPE     "
+            + simulation_type,
+            -1.30,
+            -0.52,
+            0.125,
+            text_material,
+            information_type="ALL",
+            object_prefix=object_prefix,
+        )
+
+        displayed_count += 1
+
+    return displayed_count
+
+
+def hide_all_commit_information(
+    context=None,
+    object_prefix=None,
+    **kwargs,
+):
+
+    remove_information_objects(
+        information_type="ALL",
+    )
+
+    return True
+
+
+# ============================================================
+# BACKWARD COMPATIBILITY
+# ============================================================
+
+def show_commit_information(
+    context,
+    repository,
+    positions,
+    object_prefix="",
+    **kwargs,
+):
+
+    return show_selected_commit_information(
+        context,
+        repository,
+        positions,
+        object_prefix=object_prefix,
+        **kwargs,
+    )
+
+
+def hide_commit_information(
+    context=None,
+    object_prefix=None,
+    **kwargs,
+):
+
+    hide_selected_commit_information(
+        context=context,
+        object_prefix=object_prefix,
+        **kwargs,
+    )
+
+    hide_all_commit_information(
+        context=context,
+        object_prefix=object_prefix,
+        **kwargs,
+    )
+
+    return True

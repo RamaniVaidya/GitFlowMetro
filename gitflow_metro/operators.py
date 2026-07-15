@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import traceback
 
 import bpy
 
@@ -9,18 +10,28 @@ from .parser import parse_repository
 
 from .graph import build_graph
 
-from .layout import compute_layout
+from .layout import (
+    allocate_dynamic_lanes,
+    calculate_graph_depths,
+    compute_layout,
+)
 
 from .visualization import (
+    clear_visualization,
     visualize_repository,
-    clear_gitflow_scene,
-    hide_commit_information,
-    show_commit_information,
+    show_selected_commit_information,
+    show_all_commit_information,
+    hide_selected_commit_information,
+    hide_all_commit_information,
+)
+
+from .environment import (
+    create_standard_environment,
+    create_comparison_environment,
 )
 
 from .camera import (
-    frame_repository_camera,
-    setup_repository_lighting,
+    setup_repository_view,
 )
 
 from .history_simulation import (
@@ -30,317 +41,317 @@ from .history_simulation import (
 
 
 # ============================================================
-# STORED ORIGINAL REPOSITORY
+# RUNTIME STATE
 # ============================================================
 
-_IMPORTED_REPOSITORY = None
+CURRENT_REPOSITORY = None
 
-_IMPORTED_REPOSITORY_PATH = None
+CURRENT_POSITIONS = None
+
+CURRENT_DISPLAY_REPOSITORY = None
+
+CURRENT_DISPLAY_POSITIONS = None
+
+CURRENT_DISPLAY_MODE = "ORIGINAL"
+
+CURRENT_OBJECT_PREFIX = "Original_"
 
 
 # ============================================================
-# STATISTICS
+# REPOSITORY HELPERS
 # ============================================================
 
-def calculate_repository_statistics(
-    repository,
-):
-    """
-    Calculate statistics for the currently displayed graph.
+def get_repository_commits(repository):
 
-    max_active_lanes uses lane lifetime intervals when they
-    are available after compute_layout().
-    """
-
-    commit_count = len(
-        repository.commits
-    )
-
-
-    merge_count = sum(
-
-        1
-
-        for commit in repository.commits
-
-        if commit.is_merge
-    )
-
-
-    branch_point_count = sum(
-
-        1
-
-        for commit in repository.commits
-
-        if len(commit.children) > 1
-    )
-
-
-    # --------------------------------------------------------
-    # Maximum simultaneously active lanes.
-    #
-    # layout.py stores lane lifetime intervals on repository
-    # in the working implementation.
-    #
-    # Fall back to unique lane count if intervals are absent.
-    # --------------------------------------------------------
-
-    lane_intervals = getattr(
+    commits = getattr(
         repository,
-        "lane_lifetime_intervals",
+        "commits",
+        [],
+    )
+
+    if isinstance(commits, dict):
+
+        return list(
+            commits.values()
+        )
+
+    return list(commits)
+
+
+def get_commit_hash(commit):
+
+    value = getattr(
+        commit,
+        "hash",
         None,
     )
 
+    if value is None:
 
-    if lane_intervals:
-
-        depths = [
-
-            getattr(
-                commit,
-                "depth",
-                0,
-            )
-
-            for commit in repository.commits
-        ]
-
-
-        maximum_depth = max(
-            depths,
-            default=0,
+        value = getattr(
+            commit,
+            "commit_hash",
+            "",
         )
 
-
-        max_active_lanes = 0
-
-
-        for depth in range(
-            maximum_depth + 1
-        ):
-
-            active_lanes = set()
-
-
-            for interval in lane_intervals:
-
-                # Support either:
-                #
-                # (lane, start_depth, end_depth)
-                #
-                # or:
-                #
-                # {
-                #     "lane": ...,
-                #     "start_depth": ...,
-                #     "end_depth": ...
-                # }
-
-                if isinstance(
-                    interval,
-                    dict,
-                ):
-
-                    lane = interval.get(
-                        "lane"
-                    )
-
-                    start_depth = interval.get(
-                        "start_depth"
-                    )
-
-                    end_depth = interval.get(
-                        "end_depth"
-                    )
-
-                else:
-
-                    try:
-
-                        (
-                            lane,
-                            start_depth,
-                            end_depth,
-                        ) = interval
-
-                    except (
-                        TypeError,
-                        ValueError,
-                    ):
-
-                        continue
-
-
-                if (
-                    start_depth is not None
-                    and
-                    end_depth is not None
-                    and
-                    start_depth
-                    <=
-                    depth
-                    <=
-                    end_depth
-                ):
-
-                    active_lanes.add(
-                        lane
-                    )
-
-
-            max_active_lanes = max(
-
-                max_active_lanes,
-
-                len(active_lanes),
-            )
-
-
-    else:
-
-        max_active_lanes = len({
-
-            commit.branch_level
-
-            for commit in repository.commits
-        })
-
-
-    return {
-
-        "commit_count":
-            commit_count,
-
-        "merge_count":
-            merge_count,
-
-        "branch_point_count":
-            branch_point_count,
-
-        "max_active_lanes":
-            max_active_lanes,
-    }
-
-
-def update_scene_statistics(
-    scene,
-    repository,
-    repository_name,
-):
-    """
-    Update the statistics shown in the Blender panel.
-    """
-
-    statistics = (
-        calculate_repository_statistics(
-            repository
-        )
-    )
-
-
-    scene.gitflow_has_repository = True
-
-
-    scene.gitflow_repository_name = (
-        repository_name
-    )
-
-
-    scene.gitflow_commit_count = (
-        statistics[
-            "commit_count"
-        ]
-    )
-
-
-    scene.gitflow_merge_count = (
-        statistics[
-            "merge_count"
-        ]
-    )
-
-
-    scene.gitflow_branch_point_count = (
-        statistics[
-            "branch_point_count"
-        ]
-    )
-
-
-    scene.gitflow_max_active_lanes = (
-        statistics[
-            "max_active_lanes"
-        ]
-    )
+    return str(value)
 
 
 # ============================================================
-# DISPLAY HELPER
+# REPOSITORY PREPARATION
 # ============================================================
 
-def display_repository(
-    scene,
-    repository,
-    repository_name,
-):
-    """
-    Display a repository state.
+def prepare_repository(repository):
 
-    The repository passed here may be:
-
-    - original repository;
-    - simulated merge repository;
-    - simulated rebase repository.
-    """
-
-    # build_graph is safe here because it reconstructs
-    # graph metadata for the state being displayed.
+    # --------------------------------------------------------
+    # BUILD GRAPH
+    # --------------------------------------------------------
 
     build_graph(
         repository
     )
 
+    # --------------------------------------------------------
+    # ALLOCATE DYNAMIC LANES
+    # --------------------------------------------------------
+
+    allocate_dynamic_lanes(
+        repository
+    )
+
+    # --------------------------------------------------------
+    # CALCULATE DEPTHS
+    #
+    # Kept because your project prints/debugs graph depths.
+    #
+    # compute_layout(repository) calculates/uses the layout
+    # through the interface expected by your current layout.py.
+    #
+    # DO NOT pass depths as the second positional argument.
+    # Your previous error occurred because the second parameter
+    # of compute_layout() is x_spacing.
+    # --------------------------------------------------------
+
+    calculate_graph_depths(
+        repository
+    )
+
+    # --------------------------------------------------------
+    # COMPUTE POSITIONS
+    # --------------------------------------------------------
 
     positions = compute_layout(
         repository
     )
 
+    return positions
 
-    clear_gitflow_scene()
 
+# ============================================================
+# SIMULATION BRANCH SELECTION
+# ============================================================
+
+def choose_simulation_branches(repository):
+
+    branches = list(
+        repository.branches.keys()
+    )
+
+    if len(branches) < 2:
+
+        raise ValueError(
+            "At least two branches are required "
+            "for Merge/Rebase simulation."
+        )
+
+    # --------------------------------------------------------
+    # TARGET BRANCH
+    #
+    # Prefer master/main.
+    # --------------------------------------------------------
+
+    if "master" in repository.branches:
+
+        target_branch = "master"
+
+    elif "main" in repository.branches:
+
+        target_branch = "main"
+
+    else:
+
+        target_branch = branches[0]
+
+    # --------------------------------------------------------
+    # FEATURE BRANCH
+    #
+    # Prefer a branch that is not the target.
+    # --------------------------------------------------------
+
+    feature_candidates = [
+
+        branch
+
+        for branch in branches
+
+        if branch != target_branch
+    ]
+
+    if not feature_candidates:
+
+        raise ValueError(
+            "Could not find a feature branch "
+            "for simulation."
+        )
+
+    # Prefer branches with "feature" in the name.
+
+    feature_branch = next(
+
+        (
+
+            branch
+
+            for branch in feature_candidates
+
+            if "feature" in branch.lower()
+        ),
+
+        feature_candidates[0],
+    )
+
+    return (
+        target_branch,
+        feature_branch,
+    )
+
+
+# ============================================================
+# STANDARD DISPLAY
+# ============================================================
+
+def finish_standard_display(
+    context,
+    repository,
+    positions,
+    display_mode,
+    object_prefix,
+):
+
+    scene = context.scene
+
+    # --------------------------------------------------------
+    # CREATE ENVIRONMENT
+    # --------------------------------------------------------
+
+    create_standard_environment(
+        scene,
+        positions,
+    )
+
+    # --------------------------------------------------------
+    # SETUP CAMERA
+    #
+    # Camera frames only repository positions.
+    #
+    # Information boards are deliberately excluded.
+    # --------------------------------------------------------
+
+    setup_repository_view(
+        scene,
+        repository,
+        positions,
+        context=context,
+        include_environment=True,
+        include_information=False,
+    )
+
+
+# ============================================================
+# DISPLAY REPOSITORY
+# ============================================================
+
+def display_repository(
+    context,
+    repository,
+    positions,
+    *,
+    display_mode,
+    object_prefix,
+):
+
+    global CURRENT_DISPLAY_REPOSITORY
+    global CURRENT_DISPLAY_POSITIONS
+    global CURRENT_DISPLAY_MODE
+    global CURRENT_OBJECT_PREFIX
+
+    # --------------------------------------------------------
+    # CLEAR PREVIOUS DISPLAY
+    # --------------------------------------------------------
+
+    clear_visualization()
+
+    # --------------------------------------------------------
+    # CREATE REPOSITORY GRAPH
+    # --------------------------------------------------------
 
     visualize_repository(
-
         repository,
-
         positions,
+        clear_existing=False,
+        object_prefix=object_prefix,
+        display_mode=display_mode,
     )
 
+    # --------------------------------------------------------
+    # ENVIRONMENT + CAMERA
+    # --------------------------------------------------------
 
-    frame_repository_camera(
-
-        scene,
-
-        positions,
-    )
-
-
-    setup_repository_lighting(
-
-        scene,
-
-        positions,
-    )
-
-
-    update_scene_statistics(
-
-        scene,
-
+    finish_standard_display(
+        context,
         repository,
+        positions,
+        display_mode,
+        object_prefix,
+    )
 
-        repository_name,
+    # --------------------------------------------------------
+    # UPDATE DISPLAY STATE
+    # --------------------------------------------------------
+
+    CURRENT_DISPLAY_REPOSITORY = repository
+
+    CURRENT_DISPLAY_POSITIONS = positions
+
+    CURRENT_DISPLAY_MODE = display_mode
+
+    CURRENT_OBJECT_PREFIX = object_prefix
+
+
+# ============================================================
+# GET CURRENT DISPLAY
+# ============================================================
+
+def get_current_display():
+
+    repository = CURRENT_DISPLAY_REPOSITORY
+
+    positions = CURRENT_DISPLAY_POSITIONS
+
+    object_prefix = CURRENT_OBJECT_PREFIX
+
+    if repository is None:
+
+        repository = CURRENT_REPOSITORY
+
+    if positions is None:
+
+        positions = CURRENT_POSITIONS
+
+    return (
+        repository,
+        positions,
+        object_prefix,
     )
 
 
@@ -352,17 +363,12 @@ class GITFLOW_OT_import_repository(
     bpy.types.Operator
 ):
 
-    bl_idname = (
-        "gitflow.import_repository"
-    )
+    bl_idname = "gitflow.import_repository"
 
-    bl_label = (
-        "Import Repository"
-    )
+    bl_label = "Import Repository"
 
     bl_description = (
-        "Import and display the original "
-        "Git repository"
+        "Import and visualize a local Git repository"
     )
 
 
@@ -371,192 +377,102 @@ class GITFLOW_OT_import_repository(
         context,
     ):
 
-        global _IMPORTED_REPOSITORY
-
-        global _IMPORTED_REPOSITORY_PATH
-
+        global CURRENT_REPOSITORY
+        global CURRENT_POSITIONS
 
         scene = context.scene
 
-
         repo_path = bpy.path.abspath(
-
             scene.gitflow_repo_path
         )
 
-
         repo_path = os.path.normpath(
-
             repo_path
         )
-
 
         if not repo_path:
 
             self.report(
-
                 {"ERROR"},
-
                 "Select a repository folder.",
             )
 
             return {"CANCELLED"}
-
 
         if not os.path.isdir(
             repo_path
         ):
 
             self.report(
-
                 {"ERROR"},
-
                 "Repository folder does not exist.",
             )
 
             return {"CANCELLED"}
 
+        git_directory = os.path.join(
+            repo_path,
+            ".git",
+        )
+
+        if not os.path.exists(
+            git_directory
+        ):
+
+            self.report(
+                {"ERROR"},
+                "Selected folder is not a Git repository.",
+            )
+
+            return {"CANCELLED"}
 
         try:
 
             repository = parse_repository(
-
                 repo_path
             )
 
-        except Exception as exc:
-
-            self.report(
-
-                {"ERROR"},
-
-                str(exc),
+            positions = prepare_repository(
+                repository
             )
 
-            return {"CANCELLED"}
+            CURRENT_REPOSITORY = repository
 
+            CURRENT_POSITIONS = positions
 
-        if not repository.commits:
-
-            self.report(
-
-                {"ERROR"},
-
-                "No commits found.",
+            display_repository(
+                context,
+                repository,
+                positions,
+                display_mode="ORIGINAL",
+                object_prefix="Original_",
             )
 
-            return {"CANCELLED"}
+            scene.gitflow_has_repository = True
 
-
-        # Build graph metadata once after parsing.
-
-        build_graph(
-            repository
-        )
-
-
-        # Preserve original imported repository.
-
-        _IMPORTED_REPOSITORY = (
-            repository
-        )
-
-
-        _IMPORTED_REPOSITORY_PATH = (
-            repo_path
-        )
-
-
-        # ----------------------------------------------------
-        # DEFAULT BRANCH SELECTION
-        # ----------------------------------------------------
-
-        branches = getattr(
-
-            repository,
-
-            "branches",
-
-            {},
-        )
-
-
-        if "master" in branches:
-
-            scene.gitflow_target_branch = (
-                "master"
-            )
-
-        elif "main" in branches:
-
-            scene.gitflow_target_branch = (
-                "main"
-            )
-
-        elif branches:
-
-            scene.gitflow_target_branch = (
-                next(
-                    iter(branches)
+            scene.gitflow_repository_name = (
+                os.path.basename(
+                    repo_path
                 )
             )
 
-        else:
-
-            scene.gitflow_target_branch = ""
-
-
-        feature_candidates = [
-
-            branch_name
-
-            for branch_name in branches
-
-            if branch_name
-            !=
-            scene.gitflow_target_branch
-        ]
-
-
-        if feature_candidates:
-
-            scene.gitflow_feature_branch = (
-                feature_candidates[0]
+            self.report(
+                {"INFO"},
+                "Repository imported successfully.",
             )
 
-        else:
+            return {"FINISHED"}
 
-            scene.gitflow_feature_branch = ""
+        except Exception as error:
 
+            traceback.print_exc()
 
-        repository_name = os.path.basename(
+            self.report(
+                {"ERROR"},
+                str(error),
+            )
 
-            repo_path
-        )
-
-
-        display_repository(
-
-            scene,
-
-            repository,
-
-            repository_name,
-        )
-
-
-        self.report(
-
-            {"INFO"},
-
-            (
-                "Imported original repository with "
-                f"{len(repository.commits)} commits."
-            ),
-        )
-
-
-        return {"FINISHED"}
+            return {"CANCELLED"}
 
 
 # ============================================================
@@ -567,18 +483,9 @@ class GITFLOW_OT_show_original(
     bpy.types.Operator
 ):
 
-    bl_idname = (
-        "gitflow.show_original"
-    )
+    bl_idname = "gitflow.show_original"
 
-    bl_label = (
-        "Show Original"
-    )
-
-    bl_description = (
-        "Display the original imported "
-        "repository history"
-    )
+    bl_label = "Show Original"
 
 
     def execute(
@@ -586,203 +493,624 @@ class GITFLOW_OT_show_original(
         context,
     ):
 
-        if _IMPORTED_REPOSITORY is None:
+        if (
+            CURRENT_REPOSITORY is None
+            or CURRENT_POSITIONS is None
+        ):
 
             self.report(
-
-                {"WARNING"},
-
+                {"ERROR"},
                 "Import a repository first.",
             )
 
             return {"CANCELLED"}
-
-
-        scene = context.scene
-
-
-        repository_name = os.path.basename(
-
-            _IMPORTED_REPOSITORY_PATH
-        )
-
-
-        display_repository(
-
-            scene,
-
-            _IMPORTED_REPOSITORY,
-
-            repository_name,
-        )
-
-
-        self.report(
-
-            {"INFO"},
-
-            "Displayed original repository history.",
-        )
-
-
-        return {"FINISHED"}
-
-
-# ============================================================
-# SHOW MERGE RESULT
-# ============================================================
-
-class GITFLOW_OT_show_merge_result(
-    bpy.types.Operator
-):
-
-    bl_idname = (
-        "gitflow.show_merge_result"
-    )
-
-    bl_label = (
-        "Show Merge Result"
-    )
-
-    bl_description = (
-        "Simulate and display a merge without "
-        "modifying the real Git repository"
-    )
-
-
-    def execute(
-        self,
-        context,
-    ):
-
-        if _IMPORTED_REPOSITORY is None:
-
-            self.report(
-
-                {"WARNING"},
-
-                "Import a repository first.",
-            )
-
-            return {"CANCELLED"}
-
-
-        scene = context.scene
-
-
-        target_branch = (
-            scene.gitflow_target_branch.strip()
-        )
-
-
-        feature_branch = (
-            scene.gitflow_feature_branch.strip()
-        )
-
-
-        if not target_branch:
-
-            self.report(
-
-                {"ERROR"},
-
-                "Enter a target branch.",
-            )
-
-            return {"CANCELLED"}
-
-
-        if not feature_branch:
-
-            self.report(
-
-                {"ERROR"},
-
-                "Enter a feature branch.",
-            )
-
-            return {"CANCELLED"}
-
 
         try:
 
-            simulated_repository = simulate_merge(
-
-                _IMPORTED_REPOSITORY,
-
-                target_branch=target_branch,
-
-                feature_branch=feature_branch,
+            display_repository(
+                context,
+                CURRENT_REPOSITORY,
+                CURRENT_POSITIONS,
+                display_mode="ORIGINAL",
+                object_prefix="Original_",
             )
 
-        except ValueError as exc:
+            self.report(
+                {"INFO"},
+                "Showing original repository history.",
+            )
+
+            return {"FINISHED"}
+
+        except Exception as error:
+
+            traceback.print_exc()
 
             self.report(
-
                 {"ERROR"},
-
-                str(exc),
+                str(error),
             )
 
             return {"CANCELLED"}
 
 
-        repository_name = (
-
-            os.path.basename(
-                _IMPORTED_REPOSITORY_PATH
-            )
-
-            +
-
-            " [Merge Simulation]"
-        )
-
-
-        display_repository(
-
-            scene,
-
-            simulated_repository,
-
-            repository_name,
-        )
-
-
-        self.report(
-
-            {"INFO"},
-
-            (
-                f"Displayed merge of "
-                f"{feature_branch} into "
-                f"{target_branch}."
-            ),
-        )
-
-
-        return {"FINISHED"}
-
-
 # ============================================================
-# SHOW REBASE RESULT
+# SHOW MERGE
 # ============================================================
 
-class GITFLOW_OT_show_rebase_result(
+class GITFLOW_OT_show_merge(
     bpy.types.Operator
 ):
 
-    bl_idname = (
-        "gitflow.show_rebase_result"
-    )
+    bl_idname = "gitflow.show_merge"
 
-    bl_label = (
-        "Show Rebase Result"
-    )
+    bl_label = "Show Merge Result"
+
+
+    def execute(
+        self,
+        context,
+    ):
+
+        if CURRENT_REPOSITORY is None:
+
+            self.report(
+                {"ERROR"},
+                "Import a repository first.",
+            )
+
+            return {"CANCELLED"}
+
+        try:
+
+            (
+                target_branch,
+                feature_branch,
+
+            ) = choose_simulation_branches(
+                CURRENT_REPOSITORY
+            )
+
+            merge_repository = simulate_merge(
+                CURRENT_REPOSITORY,
+                target_branch,
+                feature_branch,
+            )
+
+            merge_positions = prepare_repository(
+                merge_repository
+            )
+
+            display_repository(
+                context,
+                merge_repository,
+                merge_positions,
+                display_mode="MERGE",
+                object_prefix="Merge_",
+            )
+
+            self.report(
+                {"INFO"},
+                (
+                    "Showing merge simulation: "
+                    + feature_branch
+                    + " into "
+                    + target_branch
+                    + "."
+                ),
+            )
+
+            return {"FINISHED"}
+
+        except Exception as error:
+
+            traceback.print_exc()
+
+            self.report(
+                {"ERROR"},
+                str(error),
+            )
+
+            return {"CANCELLED"}
+
+
+# ============================================================
+# SHOW REBASE
+# ============================================================
+
+class GITFLOW_OT_show_rebase(
+    bpy.types.Operator
+):
+
+    bl_idname = "gitflow.show_rebase"
+
+    bl_label = "Show Rebase Result"
+
+
+    def execute(
+        self,
+        context,
+    ):
+
+        if CURRENT_REPOSITORY is None:
+
+            self.report(
+                {"ERROR"},
+                "Import a repository first.",
+            )
+
+            return {"CANCELLED"}
+
+        try:
+
+            (
+                target_branch,
+                feature_branch,
+
+            ) = choose_simulation_branches(
+                CURRENT_REPOSITORY
+            )
+
+            rebase_repository = simulate_rebase(
+                CURRENT_REPOSITORY,
+                target_branch,
+                feature_branch,
+            )
+
+            rebase_positions = prepare_repository(
+                rebase_repository
+            )
+
+            display_repository(
+                context,
+                rebase_repository,
+                rebase_positions,
+                display_mode="REBASE",
+                object_prefix="Rebase_",
+            )
+
+            self.report(
+                {"INFO"},
+                (
+                    "Showing rebase simulation of "
+                    + feature_branch
+                    + " onto "
+                    + target_branch
+                    + "."
+                ),
+            )
+
+            return {"FINISHED"}
+
+        except Exception as error:
+
+            traceback.print_exc()
+
+            self.report(
+                {"ERROR"},
+                str(error),
+            )
+
+            return {"CANCELLED"}
+
+
+# ============================================================
+# SHOW COMPARISON
+# ============================================================
+
+class GITFLOW_OT_show_comparison(
+    bpy.types.Operator
+):
+
+    bl_idname = "gitflow.show_comparison"
+
+    bl_label = "Compare Merge vs Rebase"
+
+
+    def execute(
+        self,
+        context,
+    ):
+
+        global CURRENT_DISPLAY_REPOSITORY
+        global CURRENT_DISPLAY_POSITIONS
+        global CURRENT_DISPLAY_MODE
+        global CURRENT_OBJECT_PREFIX
+
+        if CURRENT_REPOSITORY is None:
+
+            self.report(
+                {"ERROR"},
+                "Import a repository first.",
+            )
+
+            return {"CANCELLED"}
+
+        try:
+
+            (
+                target_branch,
+                feature_branch,
+
+            ) = choose_simulation_branches(
+                CURRENT_REPOSITORY
+            )
+
+            # ------------------------------------------------
+            # CREATE SIMULATED HISTORIES
+            # ------------------------------------------------
+
+            merge_repository = simulate_merge(
+                CURRENT_REPOSITORY,
+                target_branch,
+                feature_branch,
+            )
+
+            rebase_repository = simulate_rebase(
+                CURRENT_REPOSITORY,
+                target_branch,
+                feature_branch,
+            )
+
+            # ------------------------------------------------
+            # PREPARE LAYOUTS
+            # ------------------------------------------------
+
+            merge_positions = prepare_repository(
+                merge_repository
+            )
+
+            rebase_positions = prepare_repository(
+                rebase_repository
+            )
+
+            # ------------------------------------------------
+            # SHIFT REBASE GRAPH
+            #
+            # Place rebase visualization on a separate
+            # Y section for side-by-side educational display.
+            # ------------------------------------------------
+
+            merge_y_values = [
+
+                position[1]
+
+                for position
+                in merge_positions.values()
+            ]
+
+            rebase_y_values = [
+
+                position[1]
+
+                for position
+                in rebase_positions.values()
+            ]
+
+            merge_min_y = min(
+                merge_y_values,
+                default=0.0,
+            )
+
+            merge_max_y = max(
+                merge_y_values,
+                default=0.0,
+            )
+
+            rebase_min_y = min(
+                rebase_y_values,
+                default=0.0,
+            )
+
+            comparison_gap = (
+
+                merge_max_y
+
+                - merge_min_y
+
+                + 5.5
+            )
+
+            shifted_rebase_positions = {
+
+                commit_hash: (
+
+                    position[0],
+
+                    position[1]
+                    - rebase_min_y
+                    + merge_min_y
+                    - comparison_gap,
+
+                    position[2],
+                )
+
+                for commit_hash, position
+                in rebase_positions.items()
+            }
+
+            # ------------------------------------------------
+            # CLEAR OLD DISPLAY
+            # ------------------------------------------------
+
+            clear_visualization()
+
+            # ------------------------------------------------
+            # CREATE MERGE GRAPH
+            # ------------------------------------------------
+
+            visualize_repository(
+                merge_repository,
+                merge_positions,
+                clear_existing=False,
+                object_prefix="Merge_",
+                display_mode="MERGE",
+            )
+
+            # ------------------------------------------------
+            # CREATE REBASE GRAPH
+            # ------------------------------------------------
+
+            visualize_repository(
+                rebase_repository,
+                shifted_rebase_positions,
+                clear_existing=False,
+                object_prefix="Rebase_",
+                display_mode="REBASE",
+            )
+
+            # ------------------------------------------------
+            # COMPARISON ENVIRONMENT
+            # ------------------------------------------------
+
+            create_comparison_environment(
+                context.scene,
+                merge_positions,
+                shifted_rebase_positions,
+            )
+
+            # ------------------------------------------------
+            # COMBINED CAMERA POSITIONS
+            # ------------------------------------------------
+
+            combined_positions = {}
+
+            for commit_hash, position in (
+                merge_positions.items()
+            ):
+
+                combined_positions[
+                    "MERGE_" + commit_hash
+                ] = position
+
+            for commit_hash, position in (
+                shifted_rebase_positions.items()
+            ):
+
+                combined_positions[
+                    "REBASE_" + commit_hash
+                ] = position
+
+            # ------------------------------------------------
+            # CAMERA
+            # ------------------------------------------------
+
+            setup_repository_view(
+                context.scene,
+                None,
+                combined_positions,
+                context=context,
+                include_environment=True,
+                include_information=False,
+            )
+
+            # ------------------------------------------------
+            # UPDATE DISPLAY STATE
+            #
+            # Commit-information buttons are intentionally
+            # unavailable for the combined comparison because
+            # there are two different repositories displayed.
+            # ------------------------------------------------
+
+            CURRENT_DISPLAY_REPOSITORY = None
+
+            CURRENT_DISPLAY_POSITIONS = (
+                combined_positions
+            )
+
+            CURRENT_DISPLAY_MODE = "COMPARISON"
+
+            CURRENT_OBJECT_PREFIX = ""
+
+            self.report(
+                {"INFO"},
+                (
+                    "Comparing Merge and Rebase for "
+                    + feature_branch
+                    + " and "
+                    + target_branch
+                    + "."
+                ),
+            )
+
+            return {"FINISHED"}
+
+        except Exception as error:
+
+            traceback.print_exc()
+
+            self.report(
+                {"ERROR"},
+                str(error),
+            )
+
+            return {"CANCELLED"}
+
+
+# ============================================================
+# SHOW SELECTED COMMIT INFORMATION
+# ============================================================
+
+class GITFLOW_OT_show_commit_info(
+    bpy.types.Operator
+):
+
+    bl_idname = "gitflow.show_commit_info"
+
+    bl_label = "Show Selected Commit"
+
+
+    def execute(
+        self,
+        context,
+    ):
+
+        repository, positions, object_prefix = (
+            get_current_display()
+        )
+
+        if (
+            repository is None
+            or not positions
+        ):
+
+            self.report(
+                {"ERROR"},
+                (
+                    "Commit information is not available "
+                    "for the current visualization."
+                ),
+            )
+
+            return {"CANCELLED"}
+
+        try:
+
+            result = (
+                show_selected_commit_information(
+                    context,
+                    repository,
+                    positions,
+                    object_prefix=object_prefix,
+                )
+            )
+
+            if not result:
+
+                self.report(
+                    {"WARNING"},
+                    "Select a commit sphere first.",
+                )
+
+                return {"CANCELLED"}
+
+            # Do not move/reframe camera.
+
+            self.report(
+                {"INFO"},
+                "Showing selected commit information.",
+            )
+
+            return {"FINISHED"}
+
+        except Exception as error:
+
+            traceback.print_exc()
+
+            self.report(
+                {"ERROR"},
+                str(error),
+            )
+
+            return {"CANCELLED"}
+
+
+# ============================================================
+# SHOW ALL COMMIT INFORMATION
+# ============================================================
+
+class GITFLOW_OT_show_all_commit_info(
+    bpy.types.Operator
+):
+
+    bl_idname = "gitflow.show_all_commit_info"
+
+    bl_label = "Show All Commit Information"
+
+
+    def execute(
+        self,
+        context,
+    ):
+
+        repository, positions, object_prefix = (
+            get_current_display()
+        )
+
+        if (
+            repository is None
+            or not positions
+        ):
+
+            self.report(
+                {"ERROR"},
+                (
+                    "Commit information is not available "
+                    "for the current visualization."
+                ),
+            )
+
+            return {"CANCELLED"}
+
+        try:
+
+            displayed_count = (
+                show_all_commit_information(
+                    context,
+                    repository,
+                    positions,
+                    object_prefix=object_prefix,
+                )
+            )
+
+            # Do not move/reframe camera.
+
+            self.report(
+                {"INFO"},
+                (
+                    "Showing information for "
+                    + str(displayed_count)
+                    + " commits."
+                ),
+            )
+
+            return {"FINISHED"}
+
+        except Exception as error:
+
+            traceback.print_exc()
+
+            self.report(
+                {"ERROR"},
+                str(error),
+            )
+
+            return {"CANCELLED"}
+
+# ============================================================
+# HIDE ALL COMMIT INFORMATION
+# ============================================================
+
+class GITFLOW_OT_hide_all_commit_info(
+    bpy.types.Operator
+):
+
+    bl_idname = "gitflow.hide_all_commit_info"
+
+    bl_label = "Hide All Commit Information"
 
     bl_description = (
-        "Simulate and display a rebase without "
-        "modifying the real Git repository"
+        "Hide all commit information boards"
     )
 
 
@@ -791,113 +1119,138 @@ class GITFLOW_OT_show_rebase_result(
         context,
     ):
 
-        if _IMPORTED_REPOSITORY is None:
+        try:
 
-            self.report(
-
-                {"WARNING"},
-
-                "Import a repository first.",
+            hide_all_commit_information(
+                context=context,
             )
 
-            return {"CANCELLED"}
+            self.report(
+                {"INFO"},
+                "All commit information hidden.",
+            )
 
+            return {"FINISHED"}
 
-        scene = context.scene
+        except Exception as error:
 
-
-        target_branch = (
-            scene.gitflow_target_branch.strip()
-        )
-
-
-        feature_branch = (
-            scene.gitflow_feature_branch.strip()
-        )
-
-
-        if not target_branch:
+            traceback.print_exc()
 
             self.report(
-
                 {"ERROR"},
-
-                "Enter a target branch.",
+                str(error),
             )
 
             return {"CANCELLED"}
 
+# ============================================================
+# HIDE COMMIT INFORMATION
+# ============================================================
 
-        if not feature_branch:
+class GITFLOW_OT_hide_commit_info(
+    bpy.types.Operator
+):
 
-            self.report(
+    bl_idname = "gitflow.hide_commit_info"
 
-                {"ERROR"},
+    bl_label = "Hide Commit Information"
 
-                "Enter a feature branch.",
-            )
 
-            return {"CANCELLED"}
-
+    def execute(
+        self,
+        context,
+    ):
 
         try:
 
-            simulated_repository = simulate_rebase(
-
-                _IMPORTED_REPOSITORY,
-
-                target_branch=target_branch,
-
-                feature_branch=feature_branch,
+            hide_selected_commit_information(
+                context=context,
             )
 
-        except ValueError as exc:
+            hide_all_commit_information(
+                context=context,
+            )
+
+            # Do not move/reframe camera.
 
             self.report(
+                {"INFO"},
+                "Commit information hidden.",
+            )
 
+            return {"FINISHED"}
+
+        except Exception as error:
+
+            traceback.print_exc()
+
+            self.report(
                 {"ERROR"},
-
-                str(exc),
+                str(error),
             )
 
             return {"CANCELLED"}
 
 
-        repository_name = (
+# ============================================================
+# FRAME VISUALIZATION
+# ============================================================
 
-            os.path.basename(
-                _IMPORTED_REPOSITORY_PATH
+class GITFLOW_OT_frame_visualization(
+    bpy.types.Operator
+):
+
+    bl_idname = "gitflow.frame_visualization"
+
+    bl_label = "Frame Complete Visualization"
+
+
+    def execute(
+        self,
+        context,
+    ):
+
+        repository, positions, object_prefix = (
+            get_current_display()
+        )
+
+        if not positions:
+
+            self.report(
+                {"ERROR"},
+                "No visualization is active.",
             )
 
-            +
+            return {"CANCELLED"}
 
-            " [Rebase Simulation]"
-        )
+        try:
 
+            setup_repository_view(
+                context.scene,
+                repository,
+                positions,
+                context=context,
+                include_environment=True,
+                include_information=False,
+            )
 
-        display_repository(
+            self.report(
+                {"INFO"},
+                "Visualization framed.",
+            )
 
-            scene,
+            return {"FINISHED"}
 
-            simulated_repository,
+        except Exception as error:
 
-            repository_name,
-        )
+            traceback.print_exc()
 
+            self.report(
+                {"ERROR"},
+                str(error),
+            )
 
-        self.report(
-
-            {"INFO"},
-
-            (
-                f"Displayed rebase of "
-                f"{feature_branch} onto "
-                f"{target_branch}."
-            ),
-        )
-
-
-        return {"FINISHED"}
+            return {"CANCELLED"}
 
 
 # ============================================================
@@ -908,18 +1261,9 @@ class GITFLOW_OT_clear_visualization(
     bpy.types.Operator
 ):
 
-    bl_idname = (
-        "gitflow.clear_visualization"
-    )
+    bl_idname = "gitflow.clear_visualization"
 
-    bl_label = (
-        "Clear Visualization"
-    )
-
-    bl_description = (
-        "Remove the visualization and "
-        "clear imported repository state"
-    )
+    bl_label = "Clear Visualization"
 
 
     def execute(
@@ -927,158 +1271,47 @@ class GITFLOW_OT_clear_visualization(
         context,
     ):
 
-        global _IMPORTED_REPOSITORY
+        global CURRENT_REPOSITORY
+        global CURRENT_POSITIONS
+        global CURRENT_DISPLAY_REPOSITORY
+        global CURRENT_DISPLAY_POSITIONS
+        global CURRENT_DISPLAY_MODE
+        global CURRENT_OBJECT_PREFIX
 
-        global _IMPORTED_REPOSITORY_PATH
+        try:
 
+            clear_visualization()
 
-        clear_gitflow_scene()
+            CURRENT_REPOSITORY = None
 
+            CURRENT_POSITIONS = None
 
-        _IMPORTED_REPOSITORY = None
+            CURRENT_DISPLAY_REPOSITORY = None
 
-        _IMPORTED_REPOSITORY_PATH = None
+            CURRENT_DISPLAY_POSITIONS = None
 
+            CURRENT_DISPLAY_MODE = "ORIGINAL"
 
-        scene = context.scene
+            CURRENT_OBJECT_PREFIX = "Original_"
 
+            context.scene.gitflow_has_repository = False
 
-        scene.gitflow_has_repository = False
-
-        scene.gitflow_repository_name = ""
-
-        scene.gitflow_commit_count = 0
-
-        scene.gitflow_merge_count = 0
-
-        scene.gitflow_branch_point_count = 0
-
-        scene.gitflow_max_active_lanes = 0
-
-        scene.gitflow_target_branch = ""
-
-        scene.gitflow_feature_branch = ""
-
-
-        self.report(
-
-            {"INFO"},
-
-            "GitFlow Metro visualization cleared.",
-        )
-
-
-        return {"FINISHED"}
-
-
-# ============================================================
-# SHOW COMMIT INFORMATION
-# ============================================================
-
-class GITFLOW_OT_show_commit_info(
-    bpy.types.Operator
-):
-
-    bl_idname = (
-        "gitflow.show_commit_info"
-    )
-
-    bl_label = (
-        "Show Commit Information"
-    )
-
-    bl_description = (
-        "Display information for "
-        "the selected commit"
-    )
-
-
-    def execute(
-        self,
-        context,
-    ):
-
-        active_object = (
-            context.active_object
-        )
-
-
-        if active_object is None:
+            context.scene.gitflow_repository_name = ""
 
             self.report(
+                {"INFO"},
+                "Visualization cleared.",
+            )
 
-                {"WARNING"},
+            return {"FINISHED"}
 
-                "Select a commit station.",
+        except Exception as error:
+
+            traceback.print_exc()
+
+            self.report(
+                {"ERROR"},
+                str(error),
             )
 
             return {"CANCELLED"}
-
-
-        if not active_object.name.startswith(
-            "Commit_"
-        ):
-
-            self.report(
-
-                {"WARNING"},
-
-                "Selected object is not "
-                "a commit station.",
-            )
-
-            return {"CANCELLED"}
-
-
-        if "git_hash" not in active_object:
-
-            self.report(
-
-                {"WARNING"},
-
-                "Selected object has no "
-                "commit metadata.",
-            )
-
-            return {"CANCELLED"}
-
-
-        show_commit_information(
-            active_object
-        )
-
-
-        return {"FINISHED"}
-
-
-# ============================================================
-# HIDE COMMIT INFORMATION
-# ============================================================
-
-class GITFLOW_OT_hide_commit_info(
-    bpy.types.Operator
-):
-
-    bl_idname = (
-        "gitflow.hide_commit_info"
-    )
-
-    bl_label = (
-        "Hide Commit Information"
-    )
-
-    bl_description = (
-        "Hide the currently displayed "
-        "commit information"
-    )
-
-
-    def execute(
-        self,
-        context,
-    ):
-
-        hide_commit_information()
-
-
-        return {"FINISHED"}

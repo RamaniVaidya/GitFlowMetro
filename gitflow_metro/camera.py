@@ -1,865 +1,792 @@
+from __future__ import annotations
+
 import bpy
 
+from math import atan, tan
 from mathutils import Vector
 
 
 # ============================================================
-# SETTINGS
+# CONFIGURATION
 # ============================================================
 
 CAMERA_NAME = "GitFlowMetro_Camera"
 
-KEY_LIGHT_NAME = "GitFlowMetro_KeyLight"
+CAMERA_MARGIN = 1.12
 
-FILL_LIGHT_NAME = "GitFlowMetro_FillLight"
+MIN_CAMERA_DISTANCE = 10.0
 
-WORLD_NAME = "GitFlowMetro_World"
+CAMERA_LENS = 50.0
 
+# Desired presentation angle.
+CAMERA_HEIGHT_RATIO = 0.38
 
-SYSTEM_COLLECTION_NAME = "GitFlowMetro_System"
+MIN_CAMERA_HEIGHT = 6.5
 
+# Slightly shifts the target toward the front of the graph.
+TARGET_Y_OFFSET = -0.20
 
-GRAPH_PADDING_X = 2.5
-
-GRAPH_PADDING_Y = 2.5
-
-
-MIN_CAMERA_DISTANCE = 12.0
-
-CAMERA_DISTANCE_FACTOR = 1.25
-
-
-CAMERA_ELEVATION_FACTOR = 0.75
-
-MIN_CAMERA_ELEVATION = 8.0
-
-
-CAMERA_LENS = 52.0
+# Look slightly above the floor.
+TARGET_Z_HEIGHT = 0.65
 
 
 # ============================================================
-# COLLECTION HELPERS
+# BASIC HELPERS
 # ============================================================
 
-def get_or_create_system_collection(
-    scene,
-):
-    """
-    Create or reuse the collection containing the
-    reusable GitFlow Metro camera and lights.
-    """
+def get_scene_camera(scene):
 
-    collection = bpy.data.collections.get(
-        SYSTEM_COLLECTION_NAME
+    camera = scene.camera
+
+    if camera is not None:
+        return camera
+
+    camera_data = bpy.data.cameras.new(
+        CAMERA_NAME + "_Data"
     )
 
-
-    if collection is None:
-
-        collection = bpy.data.collections.new(
-            SYSTEM_COLLECTION_NAME
-        )
-
-
-    already_linked = any(
-
-        child == collection
-
-        for child in scene.collection.children
+    camera = bpy.data.objects.new(
+        CAMERA_NAME,
+        camera_data,
     )
 
+    scene.collection.objects.link(camera)
 
-    if not already_linked:
+    scene.camera = camera
 
-        scene.collection.children.link(
-            collection
-        )
-
-
-    return collection
+    return camera
 
 
-def move_object_to_system_collection(
-    scene,
-    obj,
-):
-    """
-    Move a camera or light into GitFlowMetro_System.
-    """
+def get_position_vectors(positions):
 
-    system_collection = (
-        get_or_create_system_collection(
-            scene
-        )
-    )
+    if not positions:
+        return []
 
-
-    for current_collection in list(
-        obj.users_collection
-    ):
-
-        current_collection.objects.unlink(
-            obj
-        )
-
-
-    system_collection.objects.link(
-        obj
-    )
+    return [
+        Vector(position)
+        for position in positions.values()
+    ]
 
 
 # ============================================================
 # GRAPH BOUNDS
 # ============================================================
 
-def calculate_graph_bounds(
-    positions,
-):
+def calculate_graph_bounds(positions):
 
-    if not positions:
+    points = get_position_vectors(positions)
 
-        return (
-
-            0.0,
-
-            0.0,
-
-            0.0,
-
-            0.0,
-
-            0.0,
-
-            0.0,
-        )
-
-
-    coordinates = list(
-        positions.values()
-    )
-
+    if not points:
+        return None
 
     min_x = min(
-
-        position[0]
-
-        for position
-        in coordinates
+        point.x
+        for point in points
     )
-
 
     max_x = max(
-
-        position[0]
-
-        for position
-        in coordinates
+        point.x
+        for point in points
     )
-
 
     min_y = min(
-
-        position[1]
-
-        for position
-        in coordinates
+        point.y
+        for point in points
     )
-
 
     max_y = max(
-
-        position[1]
-
-        for position
-        in coordinates
+        point.y
+        for point in points
     )
-
 
     min_z = min(
-
-        position[2]
-
-        for position
-        in coordinates
+        point.z
+        for point in points
     )
-
 
     max_z = max(
-
-        position[2]
-
-        for position
-        in coordinates
+        point.z
+        for point in points
     )
-
 
     return (
-
         min_x,
-
         max_x,
-
         min_y,
-
         max_y,
-
         min_z,
-
         max_z,
     )
 
 
-# ============================================================
-# GRAPH CENTER
-# ============================================================
+def calculate_graph_center(positions):
 
-def calculate_graph_center(
-    positions,
-):
-
-    (
-
-        min_x,
-
-        max_x,
-
-        min_y,
-
-        max_y,
-
-        min_z,
-
-        max_z,
-
-    ) = calculate_graph_bounds(
+    bounds = calculate_graph_bounds(
         positions
     )
 
+    if bounds is None:
 
-    return Vector((
+        return Vector(
+            (
+                0.0,
+                0.0,
+                0.0,
+            )
+        )
 
+    (
+        min_x,
+        max_x,
+        min_y,
+        max_y,
+        min_z,
+        max_z,
+    ) = bounds
+
+    return Vector(
         (
-            min_x
-            + max_x
-        ) / 2.0,
-
-
-        (
-            min_y
-            + max_y
-        ) / 2.0,
-
-
-        (
-            min_z
-            + max_z
-        ) / 2.0,
-    ))
+            (min_x + max_x) / 2.0,
+            (min_y + max_y) / 2.0,
+            (min_z + max_z) / 2.0,
+        )
+    )
 
 
 # ============================================================
-# LOOK AT
+# CAMERA ORIENTATION
 # ============================================================
 
-def point_object_at(
-    obj,
+def point_camera_at(
+    camera,
     target,
 ):
 
     direction = (
-
         Vector(target)
-
-        - obj.location
+        - camera.location
     )
-
 
     if direction.length < 0.000001:
-
         return
 
-
-    obj.rotation_euler = (
+    camera.rotation_euler = (
 
         direction.to_track_quat(
-
             "-Z",
-
             "Y",
-
         ).to_euler()
+
     )
 
 
 # ============================================================
-# CAMERA
+# CAMERA DISTANCE
 # ============================================================
 
-def get_or_create_camera(
+def calculate_required_distance(
     scene,
-):
-
-    camera_object = bpy.data.objects.get(
-        CAMERA_NAME
-    )
-
-
-    if (
-
-        camera_object is not None
-
-        and camera_object.type == "CAMERA"
-    ):
-
-        move_object_to_system_collection(
-
-            scene,
-
-            camera_object,
-        )
-
-
-        scene.camera = (
-            camera_object
-        )
-
-
-        return camera_object
-
-
-    camera_data = bpy.data.cameras.new(
-        CAMERA_NAME
-    )
-
-
-    camera_object = bpy.data.objects.new(
-
-        CAMERA_NAME,
-
-        camera_data,
-    )
-
-
-    move_object_to_system_collection(
-
-        scene,
-
-        camera_object,
-    )
-
-
-    scene.camera = (
-        camera_object
-    )
-
-
-    return camera_object
-
-
-# ============================================================
-# CAMERA FRAMING
-# ============================================================
-
-def frame_repository_camera(
-    scene,
+    camera,
     positions,
+    *,
+    include_information=False,
 ):
 
-    if not positions:
+    bounds = calculate_graph_bounds(
+        positions
+    )
 
-        return None
+    if bounds is None:
 
+        return MIN_CAMERA_DISTANCE
 
     (
-
         min_x,
-
         max_x,
-
         min_y,
-
         max_y,
-
         min_z,
-
         max_z,
+    ) = bounds
 
-    ) = calculate_graph_bounds(
-        positions
+
+    graph_width = max(
+        max_x - min_x,
+        2.0,
+    )
+
+    graph_depth = max(
+        max_y - min_y,
+        2.0,
     )
 
 
-    center = calculate_graph_center(
-        positions
+    # --------------------------------------------------------
+    # HORIZONTAL SIZE
+    #
+    # The repository extends mainly along X.
+    #
+    # Add enough padding so first and last nodes remain visible.
+    # --------------------------------------------------------
+
+    horizontal_size = (
+        graph_width
+        + 4.0
     )
 
 
-    graph_width = (
+    # --------------------------------------------------------
+    # VERTICAL SIZE
+    #
+    # Includes:
+    #
+    # graph lanes
+    # floor
+    # backdrop
+    # moderate presentation padding
+    # --------------------------------------------------------
 
-        max_x
-
-        - min_x
-
-        + GRAPH_PADDING_X * 2.0
+    vertical_size = (
+        graph_depth
+        + 7.0
     )
 
 
-    graph_height = (
+    if include_information:
 
-        max_y
+        # Boards require additional vertical space.
 
-        - min_y
+        vertical_size += 3.5
 
-        + GRAPH_PADDING_Y * 2.0
+
+    horizontal_size *= CAMERA_MARGIN
+
+    vertical_size *= CAMERA_MARGIN
+
+
+    render_width = max(
+        scene.render.resolution_x,
+        1,
+    )
+
+    render_height = max(
+        scene.render.resolution_y,
+        1,
     )
 
 
-    graph_size = max(
+    aspect_ratio = (
 
-        graph_width,
+        render_width
+        / render_height
 
-        graph_height,
-
-        1.0,
     )
 
 
-    camera_distance = max(
+    sensor_width = camera.data.sensor_width
+
+    lens = camera.data.lens
+
+
+    horizontal_fov = (
+
+        2.0
+
+        * atan(
+
+            sensor_width
+
+            / (2.0 * lens)
+
+        )
+
+    )
+
+
+    vertical_fov = (
+
+        2.0
+
+        * atan(
+
+            tan(
+                horizontal_fov / 2.0
+            )
+
+            / aspect_ratio
+
+        )
+
+    )
+
+
+    horizontal_distance = (
+
+        horizontal_size
+
+        / (
+
+            2.0
+
+            * tan(
+                horizontal_fov / 2.0
+            )
+
+        )
+
+    )
+
+
+    vertical_distance = (
+
+        vertical_size
+
+        / (
+
+            2.0
+
+            * tan(
+                vertical_fov / 2.0
+            )
+
+        )
+
+    )
+
+
+    return max(
+
+        horizontal_distance,
+
+        vertical_distance,
 
         MIN_CAMERA_DISTANCE,
 
-        graph_size
-
-        * CAMERA_DISTANCE_FACTOR,
     )
-
-
-    camera_elevation = max(
-
-        MIN_CAMERA_ELEVATION,
-
-        graph_size
-
-        * CAMERA_ELEVATION_FACTOR,
-    )
-
-
-    camera_object = (
-        get_or_create_camera(
-            scene
-        )
-    )
-
-
-    camera_object.location = Vector((
-
-        center.x,
-
-
-        center.y
-
-        - camera_distance,
-
-
-        center.z
-
-        + camera_elevation,
-    ))
-
-
-    camera_object.data.lens = (
-        CAMERA_LENS
-    )
-
-
-    camera_object.data.clip_start = 0.1
-
-
-    camera_object.data.clip_end = max(
-
-        1000.0,
-
-        graph_size * 20.0,
-    )
-
-
-    point_object_at(
-
-        camera_object,
-
-        center,
-    )
-
-
-    scene.camera = (
-        camera_object
-    )
-
-
-    print(
-        "Camera framed repository"
-    )
-
-
-    print(
-
-        "Graph center:",
-
-        tuple(center),
-    )
-
-
-    print(
-
-        "Graph size:",
-
-        graph_size,
-    )
-
-
-    print(
-
-        "Camera position:",
-
-        tuple(
-            camera_object.location
-        ),
-    )
-
-
-    return camera_object
 
 
 # ============================================================
-# AREA LIGHT
+# VIEWPORT CAMERA VIEW
 # ============================================================
 
-def get_or_create_area_light(
-    scene,
-    object_name,
-):
+def enter_camera_view(context):
 
-    light_object = bpy.data.objects.get(
-        object_name
-    )
-
-
-    if (
-
-        light_object is not None
-
-        and light_object.type == "LIGHT"
-    ):
-
-        move_object_to_system_collection(
-
-            scene,
-
-            light_object,
-        )
-
-
-        return light_object
-
-
-    light_data = bpy.data.lights.new(
-
-        name=object_name,
-
-        type="AREA",
-    )
-
-
-    light_object = bpy.data.objects.new(
-
-        object_name,
-
-        light_data,
-    )
-
-
-    move_object_to_system_collection(
-
-        scene,
-
-        light_object,
-    )
-
-
-    return light_object
-
-
-# ============================================================
-# WORLD LIGHTING
-# ============================================================
-
-def setup_world_lighting(
-    scene,
-):
-
-    world = scene.world
-
-
-    if world is None:
-
-        world = bpy.data.worlds.new(
-            WORLD_NAME
-        )
-
-
-        scene.world = world
-
-
-    world.use_nodes = True
-
-
-    background = world.node_tree.nodes.get(
-        "Background"
-    )
-
-
-    if background is not None:
-
-        background.inputs[
-            "Color"
-        ].default_value = (
-
-            0.035,
-
-            0.045,
-
-            0.065,
-
-            1.0,
-        )
-
-
-        background.inputs[
-            "Strength"
-        ].default_value = 0.35
-
-
-# ============================================================
-# REPOSITORY LIGHTING
-# ============================================================
-
-def setup_repository_lighting(
-    scene,
-    positions,
-):
-
-    if not positions:
-
+    if context is None:
         return
 
 
+    screen = context.screen
+
+    if screen is None:
+        return
+
+
+    for area in screen.areas:
+
+        if area.type != "VIEW_3D":
+            continue
+
+
+        space = area.spaces.active
+
+        if space is None:
+            continue
+
+
+        region_3d = space.region_3d
+
+        if region_3d is None:
+            continue
+
+
+        region_3d.view_perspective = "CAMERA"
+
+
+# ============================================================
+# CAMERA CLIPPING
+# ============================================================
+
+def update_camera_clipping(
+    camera,
+    distance,
+):
+
+    camera.data.clip_start = 0.05
+
+    camera.data.clip_end = max(
+
+        distance * 10.0,
+
+        500.0,
+
+    )
+
+
+# ============================================================
+# MAIN REPOSITORY CAMERA
+# ============================================================
+
+def setup_repository_view(
+    scene,
+    repository,
+    positions,
+    *,
+    context=None,
+    include_environment=True,
+    include_information=False,
+    **kwargs,
+):
+
+    if not positions:
+        return None
+
+
+    camera = get_scene_camera(
+        scene
+    )
+
+
+    camera.name = CAMERA_NAME
+
+    camera.data.type = "PERSP"
+
+    camera.data.lens = CAMERA_LENS
+
+    camera.data.sensor_width = 36.0
+
+
+    bounds = calculate_graph_bounds(
+        positions
+    )
+
+
     (
-
         min_x,
-
         max_x,
-
         min_y,
-
         max_y,
-
         min_z,
-
         max_z,
-
-    ) = calculate_graph_bounds(
-        positions
-    )
+    ) = bounds
 
 
-    center = calculate_graph_center(
-        positions
-    )
+    center_x = (
+
+        min_x + max_x
+
+    ) / 2.0
+
+
+    center_y = (
+
+        min_y + max_y
+
+    ) / 2.0
 
 
     graph_width = max(
 
         max_x - min_x,
 
-        1.0,
+        2.0,
+
     )
 
 
-    graph_height = max(
+    graph_depth = max(
 
         max_y - min_y,
 
-        1.0,
+        2.0,
+
     )
 
 
-    graph_size = max(
+    # ========================================================
+    # REQUIRED CAMERA DISTANCE
+    # ========================================================
 
-        graph_width,
-
-        graph_height,
-
-        1.0,
-    )
-
-
-    # --------------------------------------------------------
-    # KEY LIGHT
-    # --------------------------------------------------------
-
-    key_light = get_or_create_area_light(
+    calculated_distance = calculate_required_distance(
 
         scene,
 
-        KEY_LIGHT_NAME,
-    )
-
-
-    key_light.location = Vector((
-
-        center.x
-
-        - graph_width * 0.20,
-
-
-        center.y
-
-        - graph_size * 0.35,
-
-
-        center.z
-
-        + max(
-
-            7.0,
-
-            graph_size * 0.65,
-        ),
-    ))
-
-
-    key_light.data.energy = max(
-
-        700.0,
-
-        graph_size * 55.0,
-    )
-
-
-    key_light.data.shape = "DISK"
-
-
-    key_light.data.size = max(
-
-        5.0,
-
-        graph_size * 0.45,
-    )
-
-
-    point_object_at(
-
-        key_light,
-
-        center,
-    )
-
-
-    # --------------------------------------------------------
-    # FILL LIGHT
-    # --------------------------------------------------------
-
-    fill_light = get_or_create_area_light(
-
-        scene,
-
-        FILL_LIGHT_NAME,
-    )
-
-
-    fill_light.location = Vector((
-
-        center.x
-
-        + graph_width * 0.35,
-
-
-        center.y
-
-        + graph_size * 0.25,
-
-
-        center.z
-
-        + max(
-
-            4.0,
-
-            graph_size * 0.30,
-        ),
-    ))
-
-
-    fill_light.data.energy = max(
-
-        350.0,
-
-        graph_size * 25.0,
-    )
-
-
-    fill_light.data.shape = "DISK"
-
-
-    fill_light.data.size = max(
-
-        4.0,
-
-        graph_size * 0.35,
-    )
-
-
-    point_object_at(
-
-        fill_light,
-
-        center,
-    )
-
-
-    setup_world_lighting(
-        scene
-    )
-
-
-    print(
-        "Repository lighting configured"
-    )
-
-
-# ============================================================
-# COMPLETE VIEW SETUP
-# ============================================================
-
-def setup_repository_view(
-    scene,
-    positions,
-):
-
-    camera = frame_repository_camera(
-
-        scene,
+        camera,
 
         positions,
+
+        include_information=include_information,
+
     )
 
 
-    setup_repository_lighting(
+    # ========================================================
+    # IMPORTANT:
+    #
+    # Do not place the camera as far away as the previous
+    # version did.
+    #
+    # The graph should occupy most of the camera frame.
+    # ========================================================
 
-        scene,
+    camera_distance = max(
 
-        positions,
+        calculated_distance * 0.78,
+
+        graph_width * 0.62,
+
+        11.0,
+
+    )
+
+
+    # ========================================================
+    # CAMERA HEIGHT
+    #
+    # Higher than previous version.
+    #
+    # This creates the presentation view shown in your
+    # second screenshot:
+    #
+    # - backdrop remains mostly front-facing
+    # - graph is visible from above
+    # - branch lanes do not collapse into one line
+    # ========================================================
+
+    camera_height = max(
+
+        MIN_CAMERA_HEIGHT,
+
+        camera_distance
+        * CAMERA_HEIGHT_RATIO,
+
+        graph_depth + 4.5,
+
+    )
+
+
+    # ========================================================
+    # CAMERA TARGET
+    #
+    # Target is placed slightly above graph floor.
+    #
+    # Looking at the graph center instead of the backdrop
+    # center prevents the nodes from appearing too low.
+    # ========================================================
+
+    target = Vector(
+
+        (
+
+            center_x,
+
+            center_y
+            + TARGET_Y_OFFSET,
+
+            TARGET_Z_HEIGHT,
+
+        )
+
+    )
+
+
+    # ========================================================
+    # CAMERA LOCATION
+    #
+    # X:
+    # centered with repository.
+    #
+    # Y:
+    # in front of graph/backdrop.
+    #
+    # Z:
+    # elevated.
+    #
+    # No lateral X offset.
+    #
+    # This keeps the backdrop parallel-looking and avoids
+    # the unwanted diagonal side perspective.
+    # ========================================================
+
+    camera.location = Vector(
+
+        (
+
+            center_x,
+
+            min_y
+            - camera_distance,
+
+            camera_height,
+
+        )
+
+    )
+
+
+    point_camera_at(
+
+        camera,
+
+        target,
+
+    )
+
+
+    update_camera_clipping(
+
+        camera,
+
+        camera_distance,
+
+    )
+
+
+    scene.camera = camera
+
+
+    # ========================================================
+    # REFRESH INFORMATION BOARD ORIENTATION
+    # ========================================================
+
+    try:
+
+        from .visualization import (
+            refresh_information_board_orientation,
+        )
+
+
+        refresh_information_board_orientation(
+
+            camera
+
+        )
+
+
+    except ImportError:
+
+        pass
+
+
+    # ========================================================
+    # ENTER CAMERA VIEW
+    # ========================================================
+
+    enter_camera_view(
+
+        context
+
     )
 
 
     return camera
+
+
+# ============================================================
+# FRAME COMPLETE VISUALIZATION
+# ============================================================
+
+def frame_complete_visualization(
+    context,
+    repository=None,
+    positions=None,
+    *,
+    include_information=True,
+    **kwargs,
+):
+
+    if context is None:
+        return False
+
+
+    scene = context.scene
+
+
+    if positions is None:
+
+        positions = getattr(
+
+            scene,
+
+            "gitflow_positions",
+
+            None,
+
+        )
+
+
+    if not positions:
+        return False
+
+
+    setup_repository_view(
+
+        scene,
+
+        repository,
+
+        positions,
+
+        context=context,
+
+        include_environment=True,
+
+        include_information=include_information,
+
+    )
+
+
+    return True
+
+
+# ============================================================
+# BACKWARD COMPATIBILITY
+# ============================================================
+
+def frame_visualization(
+    context,
+    repository=None,
+    positions=None,
+    **kwargs,
+):
+
+    return frame_complete_visualization(
+
+        context,
+
+        repository,
+
+        positions,
+
+        **kwargs,
+
+    )
+
+
+def setup_camera(
+    scene,
+    repository,
+    positions,
+    *,
+    context=None,
+    include_environment=True,
+    include_information=False,
+    **kwargs,
+):
+
+    return setup_repository_view(
+
+        scene,
+
+        repository,
+
+        positions,
+
+        context=context,
+
+        include_environment=include_environment,
+
+        include_information=include_information,
+
+        **kwargs,
+
+    )

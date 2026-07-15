@@ -27,470 +27,216 @@ class GITFLOW_PT_main_panel(
 
         scene = context.scene
 
-        active_object = context.active_object
-
 
         # ====================================================
-        # REPOSITORY SELECTION
+        # REPOSITORY
         # ====================================================
 
         repository_box = layout.box()
 
-
         repository_box.label(
-
-            text="Repository Selection",
-
+            text="Repository",
             icon="FILE_FOLDER",
         )
 
 
         repository_box.prop(
-
             scene,
-
             "gitflow_repo_path",
-
             text="",
         )
 
 
-        # ====================================================
-        # IMPORT / CLEAR
-        # ====================================================
-
-        layout.separator()
-
-
-        import_row = layout.row()
-
-        import_row.scale_y = 1.5
-
-
-        import_row.operator(
-
+        repository_box.operator(
             "gitflow.import_repository",
-
             text="Import Repository",
-
             icon="IMPORT",
         )
 
 
-        clear_row = layout.row()
-
-        clear_row.scale_y = 1.25
-
-
-        clear_row.operator(
-
-            "gitflow.clear_visualization",
-
-            text="Clear Visualization",
-
-            icon="TRASH",
-        )
-
-
         # ====================================================
-        # LEARNING MODE
+        # REPOSITORY-DEPENDENT CONTROLS
         # ====================================================
-
-        layout.separator()
-
-
-        learning_box = layout.box()
-
-
-        learning_box.label(
-
-            text="Merge vs Rebase Learning Mode",
-
-            icon="MODIFIER",
-        )
-
 
         if scene.gitflow_has_repository:
 
 
-            learning_box.prop(
+            # =================================================
+            # HISTORY VIEWS
+            # =================================================
 
-                scene,
+            view_box = layout.box()
 
-                "gitflow_target_branch",
-
-                text="Target Branch",
+            view_box.label(
+                text="History Views",
+                icon="GRAPH",
             )
 
 
-            learning_box.prop(
-
-                scene,
-
-                "gitflow_feature_branch",
-
-                text="Feature Branch",
-            )
-
-
-            learning_box.separator()
-
-
-            original_row = (
-                learning_box.row()
-            )
-
-            original_row.scale_y = 1.2
-
-
-            original_row.operator(
-
+            view_box.operator(
                 "gitflow.show_original",
-
                 text="Show Original",
-
                 icon="FILE_REFRESH",
             )
 
 
-            merge_row = (
-                learning_box.row()
-            )
-
-            merge_row.scale_y = 1.2
-
-
-            merge_row.operator(
-
-                "gitflow.show_merge_result",
-
+            view_box.operator(
+                "gitflow.show_merge",
                 text="Show Merge Result",
-
                 icon="AUTOMERGE_ON",
             )
 
 
-            rebase_row = (
-                learning_box.row()
-            )
-
-            rebase_row.scale_y = 1.2
-
-
-            rebase_row.operator(
-
-                "gitflow.show_rebase_result",
-
+            view_box.operator(
+                "gitflow.show_rebase",
                 text="Show Rebase Result",
-
-                icon="SORT_ASC",
+                icon="SORTTIME",
             )
 
 
-        else:
+            # =================================================
+            # EDUCATIONAL COMPARISON
+            # =================================================
 
-            learning_box.label(
+            comparison_box = layout.box()
 
-                text="Import a repository first.",
+            comparison_box.label(
+                text="Merge vs Rebase",
+                icon="MOD_ARRAY",
+            )
 
+
+            comparison_box.operator(
+                "gitflow.show_comparison",
+                text="Compare Merge vs Rebase",
+                icon="MOD_ARRAY",
+            )
+
+
+            comparison_box.separator()
+
+
+            comparison_box.label(
+                text="Merge:"
+            )
+
+
+            comparison_box.label(
+                text="Preserves branch structure"
+            )
+
+
+            comparison_box.label(
+                text="Creates a merge commit"
+            )
+
+
+            comparison_box.separator()
+
+
+            comparison_box.label(
+                text="Rebase:"
+            )
+
+
+            comparison_box.label(
+                text="Replays feature commits"
+            )
+
+
+            comparison_box.label(
+                text="Creates linear history"
+            )
+
+
+            # =================================================
+            # COMMIT INFORMATION
+            # =================================================
+
+            info_box = layout.box()
+
+            info_box.label(
+                text="Commit Information",
                 icon="INFO",
             )
 
 
-        # ====================================================
-        # EDUCATIONAL EXPLANATION
-        # ====================================================
-
-        layout.separator()
-
-
-        explanation_box = layout.box()
-
-
-        explanation_box.label(
-
-            text="Merge vs Rebase",
-
-            icon="INFO",
-        )
-
-
-        explanation_box.label(
-
-            text="Merge preserves branch history."
-        )
-
-
-        explanation_box.label(
-
-            text="Merge creates a two-parent commit."
-        )
-
-
-        explanation_box.separator()
-
-
-        explanation_box.label(
-
-            text="Rebase replays feature commits."
-        )
-
-
-        explanation_box.label(
-
-            text="Replayed commits receive new IDs."
-        )
-
-
-        explanation_box.label(
-
-            text="Rebase produces linear history."
-        )
-
-
-        # ====================================================
-        # REPOSITORY STATISTICS
-        # ====================================================
-
-        layout.separator()
-
-
-        statistics_box = layout.box()
-
-
-        statistics_box.label(
-
-            text="Repository Statistics",
-
-            icon="GRAPH",
-        )
-
-
-        if scene.gitflow_has_repository:
-
-
-            statistics_box.label(
-
-                text=(
-
-                    "Repository: "
-
-                    + scene.gitflow_repository_name
-                ),
-            )
-
-
-            statistics_box.separator()
-
-
-            row = statistics_box.row()
-
-            row.label(
-                text="Commits:"
-            )
-
-            row.label(
-                text=str(
-                    scene.gitflow_commit_count
-                )
-            )
-
-
-            row = statistics_box.row()
-
-            row.label(
-                text="Merge Commits:"
-            )
-
-            row.label(
-                text=str(
-                    scene.gitflow_merge_count
-                )
-            )
-
-
-            row = statistics_box.row()
-
-            row.label(
-                text="Branch Points:"
-            )
-
-            row.label(
-                text=str(
-                    scene.gitflow_branch_point_count
-                )
-            )
-
-
-            row = statistics_box.row()
-
-            row.label(
-                text="Maximum Active Lanes:"
-            )
-
-            row.label(
-                text=str(
-                    scene.gitflow_max_active_lanes
-                )
-            )
-
-
-        else:
-
-            statistics_box.label(
-
-                text="No repository imported.",
-
+            info_box.operator(
+                "gitflow.show_commit_info",
+                text="Show Selected Commit",
                 icon="INFO",
             )
 
 
-        # ====================================================
-        # COMMIT INSPECTION
-        # ====================================================
-
-        layout.separator()
-
-
-        commit_box = layout.box()
-
-
-        commit_box.label(
-
-            text="Commit Inspection",
-
-            icon="INFO",
-        )
-
-
-        valid_commit_selected = (
-
-            active_object is not None
-
-            and active_object.name.startswith(
-                "Commit_"
-            )
-
-            and "git_hash" in active_object
-        )
-
-
-        if valid_commit_selected:
-
-
-            commit_box.label(
-
-                text=(
-
-                    "Selected: "
-
-                    + active_object.get(
-                        "git_hash",
-                        "",
-                    )[:7]
-                ),
-
-                icon="CHECKMARK",
+            info_box.operator(
+                "gitflow.hide_commit_info",
+                text="Hide Selected Commit",
+                icon="HIDE_ON",
             )
 
 
-            show_row = commit_box.row()
-
-            show_row.scale_y = 1.25
+            info_box.separator()
 
 
-            show_row.operator(
-
-                "gitflow.show_commit_info",
-
-                text="Show Commit Information",
-
-                icon="HIDE_OFF",
+            info_box.operator(
+                "gitflow.show_all_commit_info",
+                text="Show All Commit Information",
+                icon="OUTLINER_OB_FONT",
             )
 
 
-        else:
-
-
-            commit_box.label(
-
-                text="Select a commit station.",
-
-                icon="RESTRICT_SELECT_OFF",
+            info_box.operator(
+                "gitflow.hide_all_commit_info",
+                text="Hide All Commit Information",
+                icon="HIDE_ON",
             )
 
 
-            show_row = commit_box.row()
+            # =================================================
+            # PRESENTATION VIEW
+            # =================================================
 
-            show_row.enabled = False
+            camera_box = layout.box()
 
-
-            show_row.operator(
-
-                "gitflow.show_commit_info",
-
-                text="Show Commit Information",
-
-                icon="HIDE_OFF",
+            camera_box.label(
+                text="Presentation View",
+                icon="VIEW_CAMERA",
             )
 
 
-        hide_row = commit_box.row()
+            camera_box.operator(
+                "gitflow.frame_visualization",
+                text="Frame Complete Visualization",
+                icon="VIEW_CAMERA",
+            )
 
 
-        hide_row.operator(
+            # =================================================
+            # CURRENT REPOSITORY
+            # =================================================
 
-            "gitflow.hide_commit_info",
+            repository_info_box = layout.box()
 
-            text="Hide Commit Information",
+            repository_info_box.label(
+                text="Current Repository",
+                icon="FILE_FOLDER",
+            )
 
-            icon="HIDE_ON",
-        )
+
+            repository_info_box.label(
+                text=scene.gitflow_repository_name,
+            )
 
 
         # ====================================================
-        # HELP
+        # CLEAR
         # ====================================================
 
         layout.separator()
 
 
-        help_box = layout.box()
-
-
-        help_box.label(
-
-            text="How to use",
-
-            icon="QUESTION",
-        )
-
-
-        help_box.label(
-            text="1. Select and import a repository."
-        )
-
-
-        help_box.label(
-            text="2. Choose target and feature branches."
-        )
-
-
-        help_box.label(
-            text="3. View the original history."
-        )
-
-
-        help_box.label(
-            text="4. View the simulated merge result."
-        )
-
-
-        help_box.label(
-            text="5. View the simulated rebase result."
-        )
-
-
-        help_box.label(
-            text="6. Compare topology and commit IDs."
+        layout.operator(
+            "gitflow.clear_visualization",
+            text="Clear Visualization",
+            icon="TRASH",
         )
